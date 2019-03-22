@@ -157,7 +157,7 @@ ioloop_events(int64_t timeout_when)
     int64_t next_event = timeout_when;
     int64_t timeout = 0;
 
-    INFO("%ld.%03ld seconds have passed on entry to ioloop_events", (now - ioloop_now) / 1000, (now - ioloop_now) % 1000);
+    INFO("%lld.%03lld seconds have passed on entry to ioloop_events", (long long)((now - ioloop_now) / 1000), (long long)((now - ioloop_now) % 1000));
     ioloop_now = now;
 
     // A timeout of zero means don't time out.
@@ -175,7 +175,9 @@ ioloop_events(int64_t timeout_when)
     FD_ZERO(&reads);
     FD_ZERO(&writes);
     FD_ZERO(&errors);
-    
+#endif
+#ifdef USE_KQUEUE
+    struct timespec ts;
 #endif
     iop = &ios;
     while (*iop) {
@@ -261,14 +263,13 @@ ioloop_events(int64_t timeout_when)
 #ifdef USE_KQUEUE
 #define KEV_MAX 20
     struct kevent evs[KEV_MAX];
-    int i, rv;
-    struct timespec ts;
+    int i;
 
     INFO("waiting %ld/%ld seconds", ts.tv_sec, ts.tv_nsec);
     do {
         rv = kevent(kq, NULL, 0, evs, KEV_MAX, &ts);
         now = ioloop_timenow();
-        INFO("%ld.%03ld seconds passed waiting, got %d events", (now - ioloop_now) / 1000, (now - ioloop_now) % 1000, rv);
+        INFO("%lld.%03lld seconds passed waiting, got %d events", (long long)((now - ioloop_now) / 1000), (long long)((now - ioloop_now) % 1000), rv);
         ioloop_now = now;
         ts.tv_sec = 0;
         ts.tv_nsec = 0;

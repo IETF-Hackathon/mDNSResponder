@@ -9,9 +9,9 @@ else ifeq ($(SYSTEM), Linux)
 endif
 
 ifeq ($(os),x)
-SRPCFLAGS = -O0 -g -Wall -Werror -DSTANDALONE -I../mDNSCore -I/usr/local/include -I. -I../mDNSShared -I../DSO -MMD -MF .depfile-${notdir $<} -DUSE_KQUEUE
+SRPCFLAGS = -O0 -g -Wall -Werror -DSTANDALONE -I../mDNSCore -I/usr/local/include -I. -I../mDNSShared -I../DSO -MMD -MF .depfile-${notdir $<} -DUSE_SELECT
 LINKOPTS = -lmbedcrypto -lmbedtls -lmbedx509
-else ifeq($(os), linux)
+else ifeq ($(os), linux)
 SRPCFLAGS = -O0 -g -Wall -Werror -DSTANDALONE -I../mDNSCore -I/usr/local/include -I. -I../mDNSShared -I../DSO -MMD -MF .depfile-${notdir $<} -DNOT_HAVE_SA_LEN -DUSE_SELECT
 LINKOPTS = -lmbedcrypto -lmbedtls -lmbedx509
 endif
