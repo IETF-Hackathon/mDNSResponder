@@ -50,7 +50,6 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
-#include <sys/event.h>
 #include <fcntl.h>
 #include <sys/time.h>
 
@@ -59,8 +58,6 @@
 #include "srp-crypto.h"
 #include "ioloop.h"
 #include "dnssd-proxy.h"
-
-#pragma mark structures
 
 typedef struct subnet subnet_t;
 struct subnet {
@@ -130,7 +127,6 @@ bool
 srp_relay(comm_t *comm, dns_message_t *message)
 {
     dns_name_t *update_zone;
-    bool updating_services_dot_arpa = false;
     int i;
     dns_host_description_t *host_description = NULL;
     delete_t *deletes = NULL, *dp, **dpp = &deletes;
@@ -140,6 +136,7 @@ srp_relay(comm_t *comm, dns_message_t *message)
     char namebuf[DNS_MAX_NAME_SIZE + 1], namebuf1[DNS_MAX_NAME_SIZE + 1];
     bool ret = false;
     struct timeval now;
+    bool updating_services_dot_arpa = false;
 
     // Update requires a single SOA record as the question
     if (message->qdcount != 1) {
@@ -162,8 +159,10 @@ srp_relay(comm_t *comm, dns_message_t *message)
 
     // What zone are we updating?
     if (dns_names_equal_text(update_zone, "services.arpa")) {
-        updating_services_dot_arpa = true;
+          updating_services_dot_arpa = true;
     }
+
+    (void)updating_services_dot_arpa;
 
     // Scan over the authority RRs; do the delete consistency check.  We can't do other consistency checks
     // because we can't assume a particular order to the records other than that deletes have to come before
@@ -514,7 +513,9 @@ main(int argc, char **argv)
                 ERROR("Invalid IP address: %s.", argv[i]);
                 return usage(argv[0]);
             }
+#ifndef NOT_HAVE_SA_LEN
             server.sa.sa_len = len;
+#endif
             if (i++ == argc) {
                 ERROR("-s is missing server port.");
                 return usage(argv[0]);

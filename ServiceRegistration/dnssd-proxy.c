@@ -38,7 +38,6 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
-#include <sys/event.h>
 #include <fcntl.h>
 #include <sys/time.h>
 #include <ctype.h>
@@ -1183,7 +1182,8 @@ dns_push_subscription_change(const char *opcode_name, comm_t *comm, const dns_wi
             ERROR("activity name overflow for %s", activity_name);
             return;
         }
-        strncpy(&activity_name[len], local_suffix, sizeof local_suffix);
+        const int lslen = sizeof local_suffix;
+        strncpy(&activity_name[len], local_suffix, lslen);
     } else {
         dns_name_print(question.name, &activity_name[8], (sizeof activity_name) - 8);
     }
@@ -1593,6 +1593,10 @@ main(int argc, char **argv)
         return 1;
     }
     
+    (void)tcp4_listener;
+    (void)udp4_listener;
+    (void)tls4_listener;
+
     do {
         int something = 0;
         something = ioloop_events(0);

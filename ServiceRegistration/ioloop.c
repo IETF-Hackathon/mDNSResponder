@@ -18,6 +18,7 @@
  */
 
 #define __APPLE_USE_RFC_3542
+#define _GNU_SOURCE
 
 #include <stdlib.h>
 #include <string.h>
@@ -28,9 +29,12 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#ifdef USE_KQUEUE
 #include <sys/event.h>
+#endif
 #include <fcntl.h>
 #include <sys/time.h>
+#include <sys/signal.h>
 
 #include "srp.h"
 #include "dns-msg.h"
@@ -38,8 +42,6 @@
 #include "ioloop.h"
 #include "srp-tls.h"
 
-#define USE_SELECT
-#pragma mark Globals
 io_t *ios;
 int64_t ioloop_now;
 
@@ -155,7 +157,7 @@ ioloop_events(int64_t timeout_when)
     int64_t next_event = timeout_when;
     int64_t timeout = 0;
 
-    INFO("%qd.%03qd seconds have passed on entry to ioloop_events", (now - ioloop_now) / 1000, (now - ioloop_now) % 1000);
+    INFO("%ld.%03ld seconds have passed on entry to ioloop_events", (now - ioloop_now) / 1000, (now - ioloop_now) % 1000);
     ioloop_now = now;
 
     // A timeout of zero means don't time out.
@@ -198,7 +200,7 @@ ioloop_events(int64_t timeout_when)
             continue;
         }
 
-        // INFO("now: %qd  io %d wakeup_time %qd  next_event %qd", ioloop_now, io->sock, io->wakeup_time, next_event);
+        // INFO("now: %ld  io %d wakeup_time %ld  next_event %ld", ioloop_now, io->sock, io->wakeup_time, next_event);
 
         // If we were given a timeout in the future, or told to wait indefinitely, wait until the next event.
         if (timeout_when == 0 || timeout_when > ioloop_now) {
@@ -236,14 +238,14 @@ ioloop_events(int64_t timeout_when)
 #endif
 
 #ifdef USE_SELECT
-    INFO("waiting %ld %d seconds", tv.tv_sec, tv.tv_usec);
-    rv = select(nfds, &reads, &writes, &writes, &tv);
+    INFO("waiting %ld %ld seconds", tv.tv_sec, tv.tv_usec);
+    rv = select(nfds, &reads, &writes, &errors, &tv);
     if (rv < 0) {
         ERROR("select: %s", strerror(errno));
         exit(1);
     }
     now = ioloop_timenow();
-    INFO("%qd.%03qd seconds passed waiting, got %d events", (now - ioloop_now) / 1000, (now - ioloop_now) % 1000, rv);
+    INFO("%ld.%03ld seconds passed waiting, got %d events", (now - ioloop_now) / 1000, (now - ioloop_now) % 1000, rv);
     ioloop_now = now;
     for (io = ios; io; io = io->next) {
         if (io->sock != -1) {
@@ -262,11 +264,11 @@ ioloop_events(int64_t timeout_when)
     int i, rv;
     struct timespec ts;
 
-    INFO("waiting %qd/%qd seconds", ts.tv_sec, ts.tv_nsec);
+    INFO("waiting %ld/%ld seconds", ts.tv_sec, ts.tv_nsec);
     do {
         rv = kevent(kq, NULL, 0, evs, KEV_MAX, &ts);
         now = ioloop_timenow();
-        INFO("%qd.%03qd seconds passed waiting, got %d events", (now - ioloop_now) / 1000, (now - ioloop_now) % 1000, rv);
+        INFO("%ld.%03ld seconds passed waiting, got %d events", (now - ioloop_now) / 1000, (now - ioloop_now) % 1000, rv);
         ioloop_now = now;
         ts.tv_sec = 0;
         ts.tv_nsec = 0;
@@ -598,7 +600,9 @@ setup_listener_socket(int family, int protocol, bool tls, uint16_t port, const c
         listener->address.sin6.sin6_port = port ? port : htons(53);
     }
     listener->address.sa.sa_family = family;
+#ifndef NOT_HAVE_SA_LEN
     listener->address.sa.sa_len = sl;
+#endif
     if (bind(listener->io.sock, &listener->address.sa, sl) < 0) {
         ERROR("Can't bind to 0#53/%s%s: %s",
                 protocol == IPPROTO_UDP ? "udp" : "tcp", family == AF_INET ? "v4" : "v6",

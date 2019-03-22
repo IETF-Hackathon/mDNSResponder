@@ -120,6 +120,41 @@ srp_key_setup(void)
     return NULL;
 }
 
+mbedtls_entropy_context entropy_context;
+mbedtls_ctr_drbg_context rng_context;
+bool rng_inited;
+
+uint16_t
+srp_random16()
+{
+    int status;
+    uint16_t ret;
+    char errbuf[64];
+    if (!rng_inited) {
+        status = mbedtls_entropy_add_source(&entropy_context, get_entropy,
+                                             NULL, 1, MBEDTLS_ENTROPY_SOURCE_STRONG);
+        if (status != 0) {
+            mbedtls_strerror(status, errbuf, sizeof errbuf);
+            ERROR("mbedtls_entropy_add_source failed: %s", errbuf);
+            return 0xffff;
+        }
+        mbedtls_ctr_drbg_init(&rng_context);
+        status = mbedtls_ctr_drbg_seed(&rng_context, mbedtls_entropy_func, &entropy_context, NULL, 0);
+        if (status != 0) {
+            mbedtls_strerror(status, errbuf, sizeof errbuf);
+            ERROR("mbedtls_ctr_drbg_seed failed: %s", errbuf);
+            return 0xffff;
+        }
+    }
+    status = mbedtls_ctr_drbg_random(&rng_context, (unsigned char *)&ret, sizeof ret);
+    if (status != 0) {
+        mbedtls_strerror(status, errbuf, sizeof errbuf);
+        ERROR("mbedtls_ctr_drbg_random failed: %s", errbuf);
+        return 0xffff;
+    }
+    return ret;
+}
+
 // Function to read a keypair from a file
 srp_key_t *
 srp_load_keypair(const char *file)

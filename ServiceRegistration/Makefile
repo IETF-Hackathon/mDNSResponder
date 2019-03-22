@@ -1,8 +1,20 @@
-SRPCFLAGS = -O0 -g -Wall -Werror -DSTANDALONE -I../mDNSCore -I/usr/local/include -I. -I../mDNSShared -I../DSO -MMD -MF .depfile-${notdir $<}
-LINKOPTS = -lmbedcrypto -lmbedtls -lmbedx509
-
 BUILDDIR = build
 OBJDIR = objects
+
+SYSTEM := $(shell uname -s)
+ifeq ($(SYSTEM), Darwin)
+  os=x
+else ifeq ($(SYSTEM), Linux)
+  os=linux
+endif
+
+ifeq ($(os),x)
+SRPCFLAGS = -O0 -g -Wall -Werror -DSTANDALONE -I../mDNSCore -I/usr/local/include -I. -I../mDNSShared -I../DSO -MMD -MF .depfile-${notdir $<} -DUSE_KQUEUE
+LINKOPTS = -lmbedcrypto -lmbedtls -lmbedx509
+else ifeq($(os), linux)
+SRPCFLAGS = -O0 -g -Wall -Werror -DSTANDALONE -I../mDNSCore -I/usr/local/include -I. -I../mDNSShared -I../DSO -MMD -MF .depfile-${notdir $<} -DNOT_HAVE_SA_LEN -DUSE_SELECT
+LINKOPTS = -lmbedcrypto -lmbedtls -lmbedx509
+endif
 
 all:	setup $(BUILDDIR)/srp-simple $(BUILDDIR)/srp-gw $(BUILDDIR)/keydump $(BUILDDIR)/dnssd-proxy
 

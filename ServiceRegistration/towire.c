@@ -575,9 +575,9 @@ dns_send_to_server(dns_transaction_t *NONNULL txn,
             txn->towire.error = EPROTONOSUPPORT;
             return -1;
         }
-//#ifdef HAVE_SA_LEN
+#ifndef NOT_HAVE_SA_LEN
         addr.sa.sa_len = len;
-//#endif
+#endif
 
         txn->sock = socket(addr.sa.sa_family, SOCK_DGRAM, IPPROTO_UDP);
         if (txn->sock < 0) {

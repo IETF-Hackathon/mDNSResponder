@@ -45,7 +45,8 @@
 #ifdef STANDALONE
 #undef LogMsg
 #define LogMsg(fmt, ...) fprintf(stderr, fmt "\n", ##__VA_ARGS__)
-#define mDNSRandom(x) arc4random_uniform(x)
+extern uint16_t srp_random16(void);
+#define mDNSRandom(x) srp_random16()
 #define mDNSPlatformMemAllocateClear(name, length) calloc(1, length)
 #endif // STANDALONE
 

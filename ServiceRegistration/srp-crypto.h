@@ -68,6 +68,7 @@ int srp_mbedtls_sha256_finish_ret(mbedtls_sha256_context *NONNULL sha, uint8_t *
 
 // sign_*.c:
 void srp_keypair_free(srp_key_t *NONNULL key);
+uint16_t srp_random16(void);
 srp_key_t *NULLABLE srp_load_keypair(const char *NONNULL file);
 srp_key_t *NULLABLE srp_generate_key(void);
 int srp_write_key_to_file(const char *NONNULL file, srp_key_t *NONNULL key);

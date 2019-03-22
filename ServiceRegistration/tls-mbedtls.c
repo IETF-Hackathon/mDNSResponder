@@ -203,10 +203,12 @@ srp_tls_read(comm_t *comm, unsigned char *buf, size_t max)
             ERROR("Got async in progress in TLS read!");
             // No idea how to handle this yet.
             return 0;
+#ifdef MBEDTLS_ERR_SSL_CRYPTO_IN_PROGRESS
         case MBEDTLS_ERR_SSL_CRYPTO_IN_PROGRESS:
             ERROR("Got crypto in progress in TLS read!");
             // No idea how to handle this.
             return 0;
+#endif
         default:
             ERROR("Unexpected response from SSL read: %x", -ret);
             return -1;
@@ -251,9 +253,11 @@ srp_tls_write(comm_t *comm, struct iovec *iov, int iov_len)
             case MBEDTLS_ERR_SSL_ASYNC_IN_PROGRESS:
                 ERROR("Got async in progress in TLS read!");
                 return bytes_written;
+#ifdef MBEDTLS_ERR_SSL_CRYPTO_IN_PROGRESS
             case MBEDTLS_ERR_SSL_CRYPTO_IN_PROGRESS:
                 ERROR("Got crypto in progress in TLS read!");
                 return bytes_written;
+#endif
             default:
                 ERROR("Unexpected response from SSL read: %x", -ret);
                 return -1;

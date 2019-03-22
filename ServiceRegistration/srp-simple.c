@@ -76,12 +76,7 @@ main(int argc, char **argv)
 #define CH if (towire->error) { line = __LINE__; goto fail; }
 
     // Generate a random UUID.
-#ifdef NOTYET
     message.id = srp_random16();
-#else
-    srandomdev();
-    message.id = (uint32_t)(random()) & 65535;
-#endif
     message.bitfield = 0;
     dns_qr_set(&message, dns_qr_query);
     dns_opcode_set(&message, dns_opcode_update);
