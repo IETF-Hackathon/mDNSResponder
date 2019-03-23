@@ -258,11 +258,25 @@ mDNSlocal void tcpConnectCallback(int fd, void *context)
         }
         else
         {
-            // The connection succeeded.
-            sock->connected = mDNStrue;
-            // Select for read events.
-            sock->events.fd = fd;
-            requestReadEvents(&sock->events, "mDNSPosix::tcpConnectCallback", TCPReadCallback, sock);
+            if (sock->flags & kTCPSocketFlags_UseTLS) {
+                sock->tls = mDNSPosixTLSClientStateCreate(sock);
+                if (sock->tls == mDNSNULL) {
+                    LogMsg("ERROR: TCPConnectCallback: TLS context state create failed");
+                    sock->err = mStatus_NoMemoryErr;
+                } else {
+                    if (!mDNSPosixTLSStart(sock)) {
+                        LogMsg("ERROR: TCPConnectCallback: TLS start failed");
+                        sock->err = mStatus_ConnFailed;
+                    }
+                }
+            }
+            if (sock->err == 0) {
+                // The connection succeeded.
+                sock->connected = mDNStrue;
+                // Select for read events.
+                sock->events.fd = fd;
+                requestReadEvents(&sock->events, "mDNSPosix::tcpConnectCallback", TCPReadCallback, sock);
+            }
         }
     }
 
@@ -644,8 +658,11 @@ mDNSexport long mDNSPlatformReadTCP(TCPSocket *sock, void *buf, unsigned long bu
     *closed = mDNSfalse;
     if (sock->flags & kTCPSocketFlags_UseTLS)
     {
-#if 0
+#ifdef POSIX_HAS_TLS        
         nread = mDNSPosixTLSRead(sock, buf, buflen, closed);
+#else
+        nread = mStatus_ConnReset;
+        *closed = mDNStrue;
 #endif
     } else {
         nread = mDNSPosixReadTCP(sock->events.fd, buf, buflen, closed);
@@ -679,10 +696,10 @@ mDNSexport long mDNSPlatformWriteTCP(TCPSocket *sock, const char *msg, unsigned 
 {
     if (sock->flags & kTCPSocketFlags_UseTLS)
     {
-#if 0
+#ifdef POSIX_HAS_TLS
         return mDNSPosixTLSWrite(sock, msg, len);
 #else
-	return -1;
+        return mStatus_ConnReset;
 #endif
     }
     else

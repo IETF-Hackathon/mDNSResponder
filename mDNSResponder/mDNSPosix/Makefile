@@ -71,7 +71,7 @@ SOOPTS = -shared
 CP = cp
 RM = rm
 LN = ln -s -f
-CFLAGS_COMMON = -I$(COREDIR) -I$(SHAREDDIR) -I$(DSODIR) -I$(PROXYDIR) -I$(OBJDIR) -fwrapv -W -Wall -DPID_FILE=\"/var/run/mdnsd.pid\" -DMDNS_UDS_SERVERPATH=\"/var/run/mdnsd\" -DDSO_HAS_TLS
+CFLAGS_COMMON = -I$(COREDIR) -I$(SHAREDDIR) -I$(DSODIR) -I$(PROXYDIR) -I$(OBJDIR) -fwrapv -W -Wall -DPID_FILE=\"/var/run/mdnsd.pid\" -DMDNS_UDS_SERVERPATH=\"/var/run/mdnsd\" -DDSO_HAS_TLS -DPOSIX_HAS_TLS
 CFLAGS_PTHREAD =
 LINKOPTS =
 LINKOPTS_PTHREAD = -lpthread
@@ -123,6 +123,7 @@ LD = $(CC)
 SOOPTS = -shared
 FLEXFLAGS_OS = -l
 JAVACFLAGS_OS += -I$(JDK)/include/linux
+LINKOPTS=-lmbedcrypto -lmbedtls -lmbedx509
 
 # uClibc does not support Name Service Switch
 ifneq ($(os),linux-uclibc)
@@ -168,7 +169,7 @@ CFLAGS_OS = -DHAVE_IPV6 -no-cpp-precomp -Werror -Wdeclaration-after-statement \
 CC = gcc
 LD = $(CC)
 SOOPTS = -dynamiclib
-LINKOPTS = -lSystem
+LINKOPTS = -lSystem -lmbedcrypto -lmbedtls -lmbedx509
 LDSUFFIX = dylib
 JDK = /System/Library/Frameworks/JavaVM.framework/Home
 JAVACFLAGS_OS = -dynamiclib -I/System/Library/Frameworks/JavaVM.framework/Headers -framework JavaVM
@@ -258,12 +259,12 @@ DAEMONOBJS = $(OBJDIR)/PosixDaemon.c.o $(OBJDIR)/mDNSPosix.c.o $(OBJDIR)/mDNSUNP
              $(OBJDIR)/DNSDigest.c.o $(OBJDIR)/uDNS.c.o $(OBJDIR)/DNSCommon.c.o $(OBJDIR)/uds_daemon.c.o \
              $(OBJDIR)/mDNSDebug.c.o $(OBJDIR)/dnssd_ipc.c.o $(OBJDIR)/GenLinkedList.c.o \
              $(OBJDIR)/PlatformCommon.c.o $(OBJDIR)/CryptoAlg.c.o \
-             $(OBJDIR)/dso.c.o $(OBJDIR)/dso-transport.c.o $(OBJDIR)/dnssd_clientshim.c.o
+             $(OBJDIR)/dso.c.o $(OBJDIR)/dso-transport.c.o $(OBJDIR)/dnssd_clientshim.c.o $(OBJDIR)/mbedtls.c.o
 
 # dnsextd target build dnsextd
 DNSEXTDOBJ = $(OBJDIR)/mDNSPosix.c.o $(OBJDIR)/mDNSUNP.c.o $(OBJDIR)/mDNSDebug.c.o $(OBJDIR)/GenLinkedList.c.o $(OBJDIR)/DNSDigest.c.o \
              $(OBJDIR)/DNSCommon.c.o $(OBJDIR)/PlatformCommon.c.o $(OBJDIR)/dnsextd_parser.y.o $(OBJDIR)/dnsextd_lexer.l.o \
-			 $(OBJDIR)/CryptoAlg.c.o
+			 $(OBJDIR)/CryptoAlg.c.o $(OBJDIR)/mbedtls.c.o
 
 Daemon: setup $(BUILDDIR)/mdnsd
 	@echo "Responder daemon done"
@@ -467,7 +468,7 @@ JavaDoc: Java setup
 # The following targets build embedded example programs
 SPECIALOBJ = $(OBJDIR)/mDNSPosix.c.o $(OBJDIR)/mDNSUNP.c.o $(OBJDIR)/mDNSDebug.c.o $(OBJDIR)/GenLinkedList.c.o \
 	$(OBJDIR)/DNSDigest.c.o $(OBJDIR)/uDNS.c.o $(OBJDIR)/DNSCommon.c.o $(OBJDIR)/PlatformCommon.c.o \
-	$(OBJDIR)/CryptoAlg.c.o $(OBJDIR)/dso.c.o $(OBJDIR)/dso-transport.c.o $(OBJDIR)/dnssd_clientshim.c.o
+	$(OBJDIR)/CryptoAlg.c.o $(OBJDIR)/dso.c.o $(OBJDIR)/dso-transport.c.o $(OBJDIR)/dnssd_clientshim.c.o $(OBJDIR)/mbedtls.c.o
 COMMONOBJ  = $(SPECIALOBJ) $(OBJDIR)/mDNS.c.o
 APPOBJ     = $(COMMONOBJ) $(OBJDIR)/ExampleClientApp.c.o
 

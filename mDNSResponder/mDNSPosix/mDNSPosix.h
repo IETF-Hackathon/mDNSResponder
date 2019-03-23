@@ -127,6 +127,15 @@ extern mStatus mDNSPosixListenForSignalInEventLoop( int signum);
 extern mStatus mDNSPosixIgnoreSignalInEventLoop( int signum);
 extern mStatus mDNSPosixRunEventLoopOnce( mDNS *m, const struct timeval *pTimeout, sigset_t *pSignalsReceived, mDNSBool *pDataDispatched);
 
+// From the TLS shim:
+extern mDNSBool mDNSPosixTLSInit(void);
+extern void mDNSPosixTLSContextFree(TLSContext *tls);
+extern TLSContext *mDNSPosixTLSClientStateCreate(TCPSocket *sock);
+extern mDNSBool mDNSPosixTLSStart(TCPSocket *sock);
+extern TLSContext *PosixTLSAccept(TCPListener *listenContext);
+extern int mDNSPosixTLSRead(TCPSocket *sock, void *buf, unsigned long buflen, mDNSBool *closed);
+extern int mDNSPosixTLSWrite(TCPSocket *sock, const void *buf, unsigned long buflen);
+
 #ifdef  __cplusplus
 }
 #endif
