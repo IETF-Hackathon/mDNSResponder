@@ -3217,7 +3217,8 @@ extern mDNSu32 mDNSPlatformInterfaceIndexfromInterfaceID(mDNS *const m, mDNSInte
 typedef enum
 {
     kTCPSocketFlags_Zero   = 0,
-    kTCPSocketFlags_UseTLS = (1 << 0)
+    kTCPSocketFlags_UseTLS = (1 << 0),
+	kTCPSocketFlags_TLSValidationNotRequired = (1 << 1)
 } TCPSocketFlags;
 
 typedef void (*TCPConnectionCallback)(TCPSocket *sock, void *context, mDNSBool ConnectionEstablished, mStatus err);
