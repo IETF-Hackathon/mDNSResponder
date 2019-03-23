@@ -464,11 +464,13 @@ mDNSlocal void tcpListenCallback(int fd, void *context)
 }
 
 mDNSexport TCPListener *mDNSPlatformTCPListen(mDNSAddr_Type addrType, mDNSIPPort *port, mDNSAddr *addr,
-                                              TCPSocketFlags socketFlags, mDNSBool reuseAddr, int queueLength,
+                                              TCPSocketFlags socketFlags, const char *serverName,
+                                              mDNSBool reuseAddr, int queueLength,
                                               TCPAcceptedCallback callback, void *context)
 {
     TCPListener *ret;
     int fd = -1;
+    (void)serverName;
 
     if (!mDNSPosixTCPListen(&fd, addrType, port, addr, reuseAddr, queueLength))
     {
@@ -642,7 +644,9 @@ mDNSexport long mDNSPlatformReadTCP(TCPSocket *sock, void *buf, unsigned long bu
     *closed = mDNSfalse;
     if (sock->flags & kTCPSocketFlags_UseTLS)
     {
+#if 0
         nread = mDNSPosixTLSRead(sock, buf, buflen, closed);
+#endif
     } else {
         nread = mDNSPosixReadTCP(sock->events.fd, buf, buflen, closed);
     }
@@ -675,7 +679,11 @@ mDNSexport long mDNSPlatformWriteTCP(TCPSocket *sock, const char *msg, unsigned 
 {
     if (sock->flags & kTCPSocketFlags_UseTLS)
     {
+#if 0
         return mDNSPosixTLSWrite(sock, msg, len);
+#else
+	return -1;
+#endif
     }
     else
     {
@@ -1665,8 +1673,10 @@ mDNSexport mStatus mDNSPlatformInit(mDNS *const m)
         }
     }
 
+#if 0
     // Use the SRP TLS shim.
     mDNSPosixTLSInit();
+#endif
 
     // We don't do asynchronous initialization on the Posix platform, so by the time
     // we get here the setup will already have succeeded or failed.  If it succeeded,
