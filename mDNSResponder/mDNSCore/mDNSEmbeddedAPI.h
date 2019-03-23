@@ -500,6 +500,8 @@ typedef struct ResourceRecord_struct ResourceRecord;
 typedef struct TCPListener_struct TCPListener;
 typedef struct TCPSocket_struct TCPSocket;
 typedef struct UDPSocket_struct UDPSocket;
+typedef struct TLSContext_struct TLSContext;
+typedef struct TLSServerContext_struct TLSServerContext;
 
 // ***************************************************************************
 #if 0
@@ -3223,8 +3225,8 @@ typedef void (*TCPAcceptedCallback)(TCPSocket *sock, mDNSAddr *addr, mDNSIPPort 
 									const char *remoteName, void *context);
 extern TCPSocket *mDNSPlatformTCPSocket(TCPSocketFlags flags, mDNSAddr_Type addrtype, mDNSIPPort *port, domainname *hostname, mDNSBool useBackgroundTrafficClass); // creates a TCP socket
 extern TCPListener *mDNSPlatformTCPListen(mDNSAddr_Type addrtype, mDNSIPPort *port, mDNSAddr *addr,
-										  TCPSocketFlags socketFlags, mDNSBool reuseAddr, int queueLength,
-										  TCPAcceptedCallback callback, void *context); // Listen on a port
+										  TCPSocketFlags socketFlags, const char *serverName, mDNSBool reuseAddr, int queueLength,
+										  TCPAcceptedCallback callback, void *context); // Listen on a port, serverName required for TLS only.
 extern mStatus mDNSPlatformTCPSocketSetCallback(TCPSocket *sock, TCPConnectionCallback callback, void *context);
 extern TCPSocket *mDNSPlatformTCPAccept(TCPSocketFlags flags, int sd);
 extern int        mDNSPlatformTCPGetFD(TCPSocket *sock);

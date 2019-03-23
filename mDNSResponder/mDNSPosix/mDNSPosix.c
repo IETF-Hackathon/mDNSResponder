@@ -1,6 +1,6 @@
 /* -*- Mode: C; tab-width: 4; c-file-style: "bsd"; c-basic-offset: 4; fill-column: 108; indent-tabs-mode: nil; -*-
  *
- * Copyright (c) 2002-2015 Apple Inc. All rights reserved.
+ * Copyright (c) 2002-2019 Apple Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -221,14 +221,8 @@ mDNSlocal void TCPReadCallback(int fd, void *context)
     TCPSocket *sock = context;
     (void)fd;
     
-    if (sock->flags & kTCPSocketFlags_UseTLS)
-    {
-        // implement
-    }
-    else
-    {
-        sock->callback(sock, sock->context, mDNSfalse, sock->err);
-    }
+    // TLS reading is handled in mDNSPlatformTCPRead().
+    sock->callback(sock, sock->context, mDNSfalse, sock->err);
 }
 
 mDNSlocal void tcpConnectCallback(int fd, void *context)
@@ -435,10 +429,10 @@ mDNSexport TCPSocket *mDNSPlatformTCPAccept(TCPSocketFlags flags, int fd)
 {
     TCPSocket *sock;
 
-    // XXX Add!
+    // In order to receive a TLS connection, use mDNSPlatformTCPListen().
     if (flags & kTCPSocketFlags_UseTLS)
     {
-    return mDNSNULL; // not supported yet.
+        return mDNSNULL;
     }
 
     sock = mDNSPlatformMemAllocate(sizeof *sock);
@@ -451,6 +445,7 @@ mDNSexport TCPSocket *mDNSPlatformTCPAccept(TCPSocketFlags flags, int fd)
     sock->events.fd = fd;
     sock->flags = flags;
     sock->connected = mDNStrue;
+
     return sock;
 }
 
@@ -485,14 +480,13 @@ mDNSexport TCPListener *mDNSPlatformTCPListen(mDNSAddr_Type addrType, mDNSIPPort
     }
     
     // Allocate a listener structure
-    ret = mDNSPlatformMemAllocate(sizeof *ret);
+    ret = mDNSPlatformMemAllocateClear("mDNSPlatformTCPListen", sizeof *ret);
     if (ret == NULL)
     {
         LogMsg("mDNSPlatformTCPListen: no memory for TCPListener struct.");
         close(fd);
         return mDNSNULL;
     }
-    mDNSPlatformMemZero(ret, sizeof *ret);
     ret->events.fd = fd;
     ret->callback = callback;
     ret->context = context;
@@ -648,9 +642,7 @@ mDNSexport long mDNSPlatformReadTCP(TCPSocket *sock, void *buf, unsigned long bu
     *closed = mDNSfalse;
     if (sock->flags & kTCPSocketFlags_UseTLS)
     {
-        // Implement...
-        nread = -1;
-        *closed = mDNStrue;
+        nread = mDNSPosixTLSRead(sock, buf, buflen, closed);
     } else {
         nread = mDNSPosixReadTCP(sock->events.fd, buf, buflen, closed);
     }
@@ -683,8 +675,7 @@ mDNSexport long mDNSPlatformWriteTCP(TCPSocket *sock, const char *msg, unsigned 
 {
     if (sock->flags & kTCPSocketFlags_UseTLS)
     {
-        // implement
-        return -1;
+        return mDNSPosixTLSWrite(sock, msg, len);
     }
     else
     {
@@ -1673,6 +1664,9 @@ mDNSexport mStatus mDNSPlatformInit(mDNS *const m)
             err = mStatus_NoError;
         }
     }
+
+    // Use the SRP TLS shim.
+    mDNSPosixTLSInit();
 
     // We don't do asynchronous initialization on the Posix platform, so by the time
     // we get here the setup will already have succeeded or failed.  If it succeeded,

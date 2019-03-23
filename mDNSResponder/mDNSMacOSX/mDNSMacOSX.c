@@ -1794,11 +1794,12 @@ mDNSlocal void tcpListenCallback(int fd, __unused short filter, void *context, _
 }
 
 mDNSexport TCPListener *mDNSPlatformTCPListen(mDNSAddr_Type addrtype, mDNSIPPort *port, mDNSAddr *addr,
-                                              TCPSocketFlags socketFlags, mDNSBool reuseAddr, int queueLength,
+                                              TCPSocketFlags socketFlags, const char *serverName, mDNSBool reuseAddr, int queueLength,
                                               TCPAcceptedCallback callback, void *context)
 {
     TCPListener *ret;
     int fd = -1;
+    (void)serverName; // XXX we need to use this if TLS is requested.
 
     if (!mDNSPosixTCPListen(&fd, addrtype, port, addr, reuseAddr, queueLength)) {
         if (fd != -1) {

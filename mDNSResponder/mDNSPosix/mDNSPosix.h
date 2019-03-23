@@ -1,6 +1,6 @@
 /* -*- Mode: C; tab-width: 4; c-file-style: "bsd"; c-basic-offset: 4; fill-column: 108; indent-tabs-mode: nil; -*-
  *
- * Copyright (c) 2002-2004 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2002-2019 Apple Computer, Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -83,7 +83,7 @@ struct TCPSocket_struct
     TCPSocketFlags flags;       // MUST BE FIRST FIELD -- mDNSCore expects every TCPSocket_struct to begin with TCPSocketFlags flags
     TCPConnectionCallback callback;
     PosixEventSource events;
-    // SSL context goes here.
+    TLSContext *tls;
     domainname *hostname;
     mDNSAddr remoteAddress;
     mDNSIPPort remotePort;
@@ -97,6 +97,7 @@ struct TCPListener_struct
 {
     TCPAcceptedCallback callback;
     PosixEventSource events;
+    TLSServerContext *tls;
     void *context;
     mDNSAddr_Type addressType;
     TCPSocketFlags socketFlags;
