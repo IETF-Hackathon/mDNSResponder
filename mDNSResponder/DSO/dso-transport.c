@@ -1249,7 +1249,7 @@ int dso_listen(dso_connect_state_t *listen_context)
         port = listen_context->config_port;
         reuseAddr = mDNStrue;
     }
-    listen_context->listener = mDNSPlatformTCPListen(mDNSAddrType_None, &port, NULL, kTCPSocketFlags_Zero,
+    listen_context->listener = mDNSPlatformTCPListen(mDNSAddrType_None, &port, NULL, kTCPSocketFlags_Zero, NULL,
                                                      reuseAddr, 5, dso_listen_callback, listen_context);
     if (!listen_context->listener) {
         return mStatus_UnknownErr;
