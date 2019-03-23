@@ -14154,7 +14154,7 @@ mDNSexport void mDNSCoreReceiveRawPacket(mDNS *const m, const mDNSu8 *const p, c
         const mDNSu8 *const trans = p + 14 + (pkt->v4.vlen & 0xF) * 4;
         const mDNSu8 * transEnd = p + 14 + mDNSVal16(pkt->v4.totlen);
         if (transEnd > end) transEnd = end;
-        debugf("Got IPv4 %02X from %.4a to %.4a", pkt->v4.protocol, &pkt->v4.src, &pkt->v4.dst);
+        debugf("Got IPv4 %02X from %.4a to %.4a", pkt->v4.protocol, pkt->v4.src.b, pkt->v4.dst.b);
         src.type = mDNSAddrType_IPv4; src.ip.v4 = pkt->v4.src;
         dst.type = mDNSAddrType_IPv4; dst.ip.v4 = pkt->v4.dst;
         if (transEnd >= trans + RequiredCapLen(pkt->v4.protocol))
@@ -14164,7 +14164,7 @@ mDNSexport void mDNSCoreReceiveRawPacket(mDNS *const m, const mDNSu8 *const p, c
     else if (end >= p+54 && mDNSSameOpaque16(eth->ethertype, Ethertype_IPv6))
     {
         const mDNSu8 *const trans = p + 54;
-        debugf("Got IPv6  %02X from %.16a to %.16a", pkt->v6.pro, &pkt->v6.src, &pkt->v6.dst);
+        debugf("Got IPv6  %02X from %.16a to %.16a", pkt->v6.pro, pkt->v6.src.b, pkt->v6.dst.b);
         src.type = mDNSAddrType_IPv6; src.ip.v6 = pkt->v6.src;
         dst.type = mDNSAddrType_IPv6; dst.ip.v6 = pkt->v6.dst;
         if (end >= trans + RequiredCapLen(pkt->v6.pro))
