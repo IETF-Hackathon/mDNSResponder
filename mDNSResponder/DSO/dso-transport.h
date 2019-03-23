@@ -21,6 +21,7 @@
 
 #ifdef DSO_USES_NETWORK_FRAMEWORK
 #include <Network/Network.h>
+#define DSO_HAS_TLS
 #endif
 
 // Maximum number of IP addresses that we'll deal with as a result of looking up a name
@@ -96,9 +97,12 @@ struct dso_connect_state {
 #ifdef DSO_USES_NETWORK_FRAMEWORK
     uint32_t serial;
     nw_connection_t connection;
-    bool tls_enabled;
 #else
     size_t inbuf_size;
+#endif
+#ifdef DSO_HAS_TLS
+    bool tls_enabled;
+    bool tls_validation_required; // If false, invalid or unvalidatable certs are permitted.
 #endif
     size_t outbuf_size;
     int max_outstanding_queries;
@@ -122,8 +126,9 @@ dso_connect_state_t *dso_connect_state_create(const char *host, mDNSAddr *addr, 
                                               size_t inbuf_size, size_t outbuf_size,
                                               dso_event_callback_t callback,
                                               dso_state_t *dso, void *context, const char *detail);
-#ifdef DSO_USES_NETWORK_FRAMEWORK
+#ifdef DSO_HAS_TLS
 void dso_connect_state_use_tls(dso_connect_state_t *cs);
+void dso_connect_state_set_validation_required(dso_connect_state_t *cs, bool flag);
 #endif
 void dso_connect_state_drop(dso_connect_state_t *cs);
 bool dso_connect(dso_connect_state_t *connect_state);

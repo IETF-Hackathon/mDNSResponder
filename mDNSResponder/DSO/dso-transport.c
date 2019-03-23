@@ -805,10 +805,15 @@ dso_connect_state_t *dso_connect_state_create(const char *hostname, mDNSAddr *ad
     return cs;
 }
 
-#ifdef DSO_USES_NETWORK_FRAMEWORK
+#ifdef DSO_HAS_TLS
 void dso_connect_state_use_tls(dso_connect_state_t *cs)
 {
     cs->tls_enabled = true;
+}
+
+void dso_connect_state_set_validation_required(dso_connect_state_t *cs, bool flag)
+{
+    cs->tls_validation_required = flag;
 }
 #endif
 
@@ -903,17 +908,22 @@ static void dso_connect_internal(dso_connect_state_t *cs)
     nw_parameters_configure_protocol_block_t configure_tls = NW_PARAMETERS_DISABLE_PROTOCOL;
     if (cs->tls_enabled) {
         // This sets up a block that's called when we get a TLS connection and want to verify
-        // the cert.   Right now we only support opportunistic security, which means we have
-        // no way to validate the cert.   Future work: add support for validating the cert
-        // using a TLSA record if one is present.
+        // the cert.   Right now we only support opportunistic security or PKI, which means we have
+        // no way to validate a non-PKI cert.   Future work: add support for validating the cert
+        // using a TLSA record if one is present.   Therefore if the validate flag is set, we
+        // currently validate using PKI.
         configure_tls = ^(nw_protocol_options_t tls_options) {
-            sec_protocol_options_t sec_options = nw_tls_copy_sec_protocol_options(tls_options);
-            sec_protocol_options_set_verify_block(sec_options, 
-                                                  ^(sec_protocol_metadata_t __unused metadata,
-                                                    sec_trust_t __unused trust_ref,
-                                                    sec_protocol_verify_complete_t complete) {
-                                                      complete(true);
-                                                  }, dso_dispatch_queue);
+            // If validation is not required, we add our own verify block; otherwise we take the
+            // default.
+            if (!cs->tls_validation_required) {
+                sec_protocol_options_t sec_options = nw_tls_copy_sec_protocol_options(tls_options);
+                sec_protocol_options_set_verify_block(sec_options, 
+                                                      ^(sec_protocol_metadata_t __unused metadata,
+                                                        sec_trust_t __unused trust_ref,
+                                                        sec_protocol_verify_complete_t complete) {
+                                                          complete(true);
+                                                      }, dso_dispatch_queue);
+            }
         };
     }
     parameters = nw_parameters_create_secure_tcp(configure_tls, NW_PARAMETERS_DEFAULT_CONFIGURATION);
