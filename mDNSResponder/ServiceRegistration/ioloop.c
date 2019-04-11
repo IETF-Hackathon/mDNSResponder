@@ -240,14 +240,14 @@ ioloop_events(int64_t timeout_when)
 #endif
 
 #ifdef USE_SELECT
-    INFO("waiting %ld %ld seconds", tv.tv_sec, tv.tv_usec);
+    INFO("waiting %lld %lld seconds", (long long)tv.tv_sec, (long long)tv.tv_usec);
     rv = select(nfds, &reads, &writes, &errors, &tv);
     if (rv < 0) {
         ERROR("select: %s", strerror(errno));
         exit(1);
     }
     now = ioloop_timenow();
-    INFO("%ld.%03ld seconds passed waiting, got %d events", (now - ioloop_now) / 1000, (now - ioloop_now) % 1000, rv);
+    INFO("%lld.%03lld seconds passed waiting, got %d events", (long long)((now - ioloop_now) / 1000), (long long)((now - ioloop_now) % 1000), rv);
     ioloop_now = now;
     for (io = ios; io; io = io->next) {
         if (io->sock != -1) {
@@ -265,7 +265,7 @@ ioloop_events(int64_t timeout_when)
     struct kevent evs[KEV_MAX];
     int i;
 
-    INFO("waiting %ld/%ld seconds", ts.tv_sec, ts.tv_nsec);
+    INFO("waiting %lld/%lld seconds", (long long)ts.tv_sec, (long long)ts.tv_nsec);
     do {
         rv = kevent(kq, NULL, 0, evs, KEV_MAX, &ts);
         now = ioloop_timenow();
