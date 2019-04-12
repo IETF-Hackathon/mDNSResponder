@@ -4692,7 +4692,7 @@ mDNSlocal void uDNS_HandleLLQState(mDNS *const m, DNSQuestion *q)
     case LLQ_DNSPush_Established:
         // Sanity check the server state to see if it matches.   If we find that we aren't connected, when
         // we think we should be, change our state.
-        if (q->dnsPushServer == NULL)
+        if (q->dnsPushServer == mDNSNULL)
         {
             q->state = LLQ_Init;
             q->ThisQInterval = 0;
@@ -6132,7 +6132,7 @@ static void DNSPushSendKeepalive(DNSPushNotificationServer *server, mDNSu32 inac
 {
     dso_message_t state;
     dso_transport_t *transport = server->connection->transport;
-    if (transport == NULL || transport->outbuf == NULL) {
+    if (transport == mDNSNULL || transport->outbuf == mDNSNULL) {
         // Should be impossible, don't crash.
         LogInfo("DNSPushNotificationSendSubscribe: no transport!");
         return;
@@ -6150,7 +6150,7 @@ static void DNSPushNotificationSendSubscriptionChange(mDNSBool subscribe, dso_st
     dso_message_t state;
     dso_transport_t *transport = dso->transport;
     mDNSu16 len;
-    if (transport == NULL || transport->outbuf == NULL) {
+    if (transport == mDNSNULL || transport->outbuf == mDNSNULL) {
         // Should be impossible, don't crash.
         LogInfo("DNSPushNotificationSendSubscribe: no transport!");
         return;
@@ -6179,7 +6179,7 @@ static void DNSPushStop(mDNS *m, DNSPushNotificationServer *server)
             if (q->dnsPushServer == server)
             {
                 DNSPushReconcileConnection(m, q);
-                q->dnsPushServer = NULL;
+                q->dnsPushServer = mDNSNULL;
                 q->state = LLQ_Poll;
                 q->ThisQInterval = 0;
                 q->LastQTime     = m->timenow;
@@ -6195,7 +6195,7 @@ mDNSexport void DNSPushServerDrop(DNSPushNotificationServer *server)
     if (server->connection)
     {
         dso_drop(server->connection);
-        server->connection = NULL;
+        server->connection = mDNSNULL;
     }
     if (server->connectInfo)
     {
@@ -6412,9 +6412,9 @@ DNSPushNotificationServer *GetConnectionToDNSPushNotificationServer(mDNS *m, DNS
         if (SameDomainName(&q->nta->Host, &server->serverName))
         {
             newZone = mDNSPlatformMemAllocate(sizeof(DNSPushNotificationZone));
-            if (newZone == NULL)
+            if (newZone == mDNSNULL)
             {
-                return NULL;
+                return mDNSNULL;
             }
             newZone->numberOfQuestions = 1;
             newZone->zoneName = q->nta->ChildName;
@@ -6432,15 +6432,15 @@ DNSPushNotificationServer *GetConnectionToDNSPushNotificationServer(mDNS *m, DNS
 
     // If we do not have any existing connections, create a new connection
     newServer = mDNSPlatformMemAllocate(sizeof(DNSPushNotificationServer));
-    if (newServer == NULL)
+    if (newServer == mDNSNULL)
     {
-        return NULL;
+        return mDNSNULL;
     }
     newZone   = mDNSPlatformMemAllocate(sizeof(DNSPushNotificationZone));
-    if (newZone == NULL)
+    if (newZone == mDNSNULL)
     {
         mDNSPlatformMemFree(newServer);
-        return NULL;
+        return mDNSNULL;
     }
 
     newServer->m = m;
@@ -6449,12 +6449,12 @@ DNSPushNotificationServer *GetConnectionToDNSPushNotificationServer(mDNS *m, DNS
     newServer->port = q->nta->Port;
     newServer->qDNSServer = q->qDNSServer;
     ConvertDomainNameToCString(&newServer->serverName, name);
-    newServer->connection = dso_create(mDNSfalse, 10, name, DNSPushDSOCallback, newServer, NULL);
-    if (newServer->connection == NULL)
+    newServer->connection = dso_create(mDNSfalse, 10, name, DNSPushDSOCallback, newServer, mDNSNULL);
+    if (newServer->connection == mDNSNULL)
     {
         mDNSPlatformMemFree(newServer);
         mDNSPlatformMemFree(newZone);
-        return NULL;
+        return mDNSNULL;
     }
     newServer->connectInfo = dso_connect_state_create(name, mDNSNULL, newServer->port, 10,
                                                       AbsoluteMaxDNSMessageData, AbsoluteMaxDNSMessageData,
