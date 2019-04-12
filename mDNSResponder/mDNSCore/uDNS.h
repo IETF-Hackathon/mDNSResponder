@@ -21,6 +21,7 @@
 #include "mDNSEmbeddedAPI.h"
 #include "DNSCommon.h"
 #include <sys/types.h>
+#include <netdb.h>
 #include "dso.h"
 #include "dns_sd.h"
 #include "dso-transport.h"
