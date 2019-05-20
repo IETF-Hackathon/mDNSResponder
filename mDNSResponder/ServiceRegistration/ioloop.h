@@ -43,6 +43,7 @@ typedef struct dso_transport comm_t;
 typedef struct io io_t;
 typedef void (*io_callback_t)(io_t *NONNULL io);
 typedef void (*comm_callback_t)(comm_t *NONNULL comm);
+typedef void (*disconnect_callback_t)(comm_t *NONNULL comm, int error);
 typedef void (*send_response_t)(comm_t *NONNULL comm, message_t *NONNULL responding_to, struct iovec *NONNULL iov, int count);
 
 typedef struct tls_context tls_context_t;
@@ -74,6 +75,7 @@ struct dso_transport {
     comm_callback_t NULLABLE close_callback;
     send_response_t NULLABLE send_response;
     comm_callback_t NULLABLE connected;
+    disconnect_callback_t NULLABLE disconnected;
     message_t *NULLABLE message;
     uint8_t *NULLABLE buf;
     dso_state_t *NULLABLE dso;
@@ -98,7 +100,13 @@ int ioloop_events(int64_t timeout_when);
 comm_t *NULLABLE setup_listener_socket(int family, int protocol, bool tls, uint16_t port, const char *NONNULL name,
                                        comm_callback_t NONNULL datagram_callback,
                                        comm_callback_t NULLABLE connected, void *NULLABLE context);
+comm_t *NULLABLE connect_to_host(addr_t *NONNULL remote_address, bool tls,
+                                 comm_callback_t NONNULL datagram_callback,
+                                 comm_callback_t NONNULL connected,
+                                 disconnect_callback_t NONNULL disconnected,
+                                 void *NONNULL context);
 #endif
+
 // Local Variables:
 // mode: C
 // tab-width: 4
