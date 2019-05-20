@@ -28,6 +28,7 @@ clean:
 	@if test -d $(OBJDIR)   ; then rm -r $(OBJDIR)   ; fi
 	@if test -d $(BUILDDIR) ; then rm -r $(BUILDDIR) ; fi
 
+HASHOBJS     = $(OBJDIR)/hash-mbedtls.o
 SIGNOBJS     = $(OBJDIR)/sign-mbedtls.o 
 SIMPLEOBJS   = $(OBJDIR)/towire.o $(SIGNOBJS)
 DSOOBJS      = $(OBJDIR)/dso.o
@@ -43,7 +44,7 @@ $(BUILDDIR)/dnssd-proxy:  $(OBJDIR)/dnssd-proxy.o $(SIMPLEOBJS) $(DSOOBJS) $(MDN
 $(BUILDDIR)/srp-simple:	$(OBJDIR)/srp-simple.o $(SIMPLEOBJS)
 	$(CC) -o $@ $+ $(LINKOPTS)
 
-$(BUILDDIR)/srp-gw:	$(OBJDIR)/srp-gw.o $(SIMPLEOBJS) $(FROMWIREOBJS) $(IOOBJS)
+$(BUILDDIR)/srp-gw:	$(OBJDIR)/srp-gw.o $(SIMPLEOBJS) $(FROMWIREOBJS) $(IOOBJS) $(HASHOBJS) $(CFOBJS)
 	$(CC) -o $@ $+ $(LINKOPTS)
 
 $(BUILDDIR)/keydump:	$(OBJDIR)/keydump.o $(SIMPLEOBJS) $(FROMWIREOBJS)
