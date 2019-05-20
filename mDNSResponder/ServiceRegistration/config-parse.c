@@ -82,8 +82,12 @@ static bool config_parse_line(void *context, const char *filename, char *line, i
 		}
 		if (num_hunks == 1) {
 			for (i = 0; i < num_verbs; i++) {
-				if (!strcmp(verbs[i].name, hunks[0]))
+				// If the verb name matches, or the verb name is NULL (meaning whatever doesn't
+				// match a preceding verb), we've found our verb.
+				if (verbs[i].name == NULL || !strcmp(verbs[i].name, hunks[0])) {
 					config_file_verb = &verbs[i];
+					break;
+				}
 			}
 			if (config_file_verb == NULL) {
 				LogMsg("cfParseLine: unknown verb %s at line %d", hunks[0], lineno);
