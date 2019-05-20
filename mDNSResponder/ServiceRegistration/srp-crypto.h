@@ -24,6 +24,12 @@
 #define __SRP_CRYPTO_H
 // Anonymous key structure, depends on the target.
 typedef struct srp_key srp_key_t;
+typedef struct tsig_key tsig_key_t;
+struct tsig_key {
+    dns_name_t *NONNULL name;
+    uint8_t *NONNULL secret;
+    int length;
+};
 
 #ifdef SRP_CRYPTO_MBEDTLS_INTERNAL
 #include <mbedtls/error.h>
@@ -63,8 +69,10 @@ int srp_mbedtls_sha256_finish_ret(mbedtls_sha256_context *NONNULL sha, uint8_t *
 #define SIG_HEADERLEN 11
 #define SIG_STATIC_RDLEN 18
 
-
 #define dnssec_keytype_ecdsa  13
+
+#define SRP_SHA256_HASH_SIZE        ECDSA_SHA256_HASH_SIZE
+#define SRP_HASH_TYPE_SHA256        1
 
 // sign_*.c:
 void srp_keypair_free(srp_key_t *NONNULL key);
@@ -83,6 +91,9 @@ int srp_sign(uint8_t *NONNULL output, size_t max,
 bool srp_sig0_verify(dns_wire_t *NONNULL message, dns_rr_t *NONNULL key, dns_rr_t *NONNULL signature);
 void srp_print_key(srp_key_t *NONNULL key);
 
+// hash_*.c:
+void srp_hmac_iov(int hash_type, uint8_t *NONNULL output, size_t max, struct iovec *NONNULL iov, int count);
+int srp_base64_parse(char *NONNULL src, size_t *NONNULL len_ret, uint8_t *NONNULL buf, size_t buflen);
 #endif // __SRP_CRYPTO_H
 
 // Local Variables:
