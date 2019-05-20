@@ -103,8 +103,8 @@ typedef struct dnssd_query {
     uint16_t type, qclass;          // Original query type and class.
     dns_towire_state_t towire;
     uint8_t *p_dso_length;          // Where to store the DSO length just before we write out a push notification.
-    dns_wire_t *response;           // This has to be at the end because we don't zero the RRdata buffer.
-    size_t data_size;		    // Size of the data payload of the response
+    dns_wire_t *response;
+    size_t data_size;		        // Size of the data payload of the response
 } dnssd_query_t;
 
 const char push_subscription_activity_type[] = "push subscription";
@@ -173,75 +173,6 @@ add_dnssd_query(dnssd_query_t *query)
     add_reader(io, dnssd_query_callback, dnssd_query_finalize);
 }
 
-// Parse a NUL-terminated text string into a sequence of labels.
-dns_name_t *
-dns_pres_name_parse(const char *pname)
-{
-    const char *dot = strchr(pname, '.');
-    dns_label_t *ret;
-    int len;
-    if (dot == NULL) {
-        dot = pname + strlen(pname);
-    }
-    len = (dot - pname) + 1 + (sizeof *ret) - DNS_MAX_LABEL_SIZE;
-    ret = calloc(len, 1);
-    if (ret == NULL) {
-        return NULL;
-    }
-    ret->len = dot - pname;
-    if (ret->len > 0) {
-        memcpy(ret->data, pname, ret->len);
-    }
-    ret->data[ret->len] = 0;
-    if (dot[0] == '.') {
-        ret->next = dns_pres_name_parse(dot + 1);
-    }
-    return ret;
-}
-
-bool
-dns_subdomain_of(dns_name_t *name, dns_name_t *domain, char *buf, size_t buflen)
-{
-    int dnum = 0, nnum = 0;
-    dns_name_t *np, *dp;
-    char *bufp = buf;
-    size_t bytesleft = buflen;
-
-    for (dp = domain; dp; dp = dp->next) {
-        dnum++;
-    }
-    for (np = name; np; np = np->next) {
-        nnum++;
-    }
-    if (nnum < dnum) {
-        return false;
-    }
-    for (np = name; np; np = np->next) {
-        if (nnum-- == dnum) {
-            break;
-        }
-    }
-    if (dns_names_equal(np, domain)) {
-        for (dp = name; dp != np; dp = dp->next) {
-            if (dp->len + 1 > bytesleft) {
-                // It's okay to return false here because a name that overflows the buffer isn't valid.
-                ERROR("dns_subdomain_of: out of buffer space!");
-                return false;
-            }
-            memcpy(bufp, dp->data, dp->len);
-            bufp += dp->len;
-            bytesleft = bytesleft - dp->len;
-            if (dp->next != np) {
-                *bufp++ = '.';
-                bytesleft -= dp->len;
-            }
-        }
-        *bufp = 0;
-        return true;
-    }
-    return false;
-}
-
 void
 dp_simple_response(comm_t *comm, int rcode)
 {
@@ -276,9 +207,11 @@ interface_config_t *
 dp_served(dns_name_t *name, char *buf, size_t bufsize)
 {
     interface_config_t *ifc;
+    dns_label_t *lim;
     
     for (ifc = interfaces; ifc; ifc = ifc->next) {
-        if (dns_subdomain_of(name, ifc->domain_name, buf, bufsize)) {
+        if ((lim = dns_name_subdomain_of(name, ifc->domain_name))) {
+            dns_name_print_to_limit(name, lim, buf, bufsize);
             return ifc;
         }
     }
