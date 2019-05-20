@@ -54,9 +54,15 @@ getipaddr(addr_t *addr, const char *p)
 {
     if (inet_pton(AF_INET, p, &addr->sin.sin_addr)) {
         addr->sa.sa_family = AF_INET;
+#ifndef NOT_HAVE_SA_LEN
+        addr->sa.sa_len = sizeof addr->sin;
+#endif
         return sizeof addr->sin;
     }  else if (inet_pton(AF_INET6, p, &addr->sin6.sin6_addr)) {
         addr->sa.sa_family = AF_INET6;
+#ifndef NOT_HAVE_SA_LEN
+        addr->sa.sa_len = sizeof addr->sin6;
+#endif
         return sizeof addr->sin6;
     } else {
         return 0;
@@ -110,11 +116,25 @@ ioloop_close(io_t *io)
     io->sock = -1;
 }
 
+static void
+add_io(io_t *io)
+{
+    io_t **iop;
+
+    // Add the new reader to the end of the list if it's not on the list.
+    for (iop = &ios; *iop != NULL && *iop != io; iop = &((*iop)->next))
+        ;
+    if (*iop == NULL) {
+        *iop = io;
+        io->next = NULL;
+    }
+}
+
 void
 add_reader(io_t *io, io_callback_t callback, io_callback_t finalize)
 {
-    io->next = ios;
-    ios = io;
+    add_io(io);
+
     io->read_callback = callback;
     io->finalize = finalize;
 #ifdef USE_SELECT
@@ -126,6 +146,49 @@ add_reader(io_t *io, io_callback_t callback, io_callback_t finalize)
     struct kevent ev;
     int rv;
     EV_SET(&ev, io->sock, EVFILT_READ, EV_ADD | EV_ENABLE, 0, 0, io);
+    rv = kevent(kq, &ev, 1, NULL, 0, NULL);
+    if (rv < 0) {
+        ERROR("kevent add: %s", strerror(errno));
+        return;
+    }
+#endif // USE_EPOLL
+}
+
+void
+add_writer(io_t *io, io_callback_t callback)
+{
+    add_io(io);
+
+    io->write_callback = callback;
+#ifdef USE_SELECT
+    io->want_write = true;
+#endif
+#ifdef USE_EPOLL
+#endif
+#ifdef USE_KQUEUE
+    struct kevent ev;
+    int rv;
+    EV_SET(&ev, io->sock, EVFILT_WRITE, EV_ADD | EV_ENABLE, 0, 0, io);
+    rv = kevent(kq, &ev, 1, NULL, 0, NULL);
+    if (rv < 0) {
+        ERROR("kevent add: %s", strerror(errno));
+        return;
+    }
+#endif // USE_EPOLL
+}
+
+void
+drop_writer(io_t *io)
+{
+#ifdef USE_SELECT
+    io->want_write = false;
+#endif
+#ifdef USE_EPOLL
+#endif
+#ifdef USE_KQUEUE
+    struct kevent ev;
+    int rv;
+    EV_SET(&ev, io->sock, EVFILT_WRITE, EV_ADD | EV_DISABLE, 0, 0, io);
     rv = kevent(kq, &ev, 1, NULL, 0, NULL);
     if (rv < 0) {
         ERROR("kevent add: %s", strerror(errno));
@@ -644,6 +707,106 @@ setup_listener_socket(int family, int protocol, bool tls, uint16_t port, const c
     listener->datagram_callback = datagram_callback;
     listener->connected = connected;
     return listener;
+}
+
+static void
+connect_callback(io_t *context)
+{
+    int result;
+    socklen_t len = sizeof result;
+    comm_t *connection = (comm_t *)context;
+    
+    // If connect failed, indicate that it failed.
+    if (getsockopt(context->sock, SOL_SOCKET, SO_ERROR, &result, &len) < 0) {
+        ERROR("connect_callback: unable to get connect error: socket %d: Error %d (%s)",
+              context->sock, result, strerror(result));
+        connection->disconnected(connection, result);
+        comm_free(connection);
+        return;
+    }
+    
+    // If this is a TLS connection, set up TLS.
+    if (connection->tls_context == (tls_context_t *)-1) {
+        srp_tls_connect_callback(connection);
+    }
+
+    connection->connected(connection);
+    connection->send_response = tcp_send_response;
+    drop_writer(&connection->io);
+    add_reader(&connection->io, tcp_read_callback, NULL);
+}
+
+// Currently we don't do DNS lookups, despite the host identifier being an IP address.
+comm_t *
+connect_to_host(addr_t *NONNULL remote_address, bool tls,
+                comm_callback_t datagram_callback, comm_callback_t connected,
+                disconnect_callback_t disconnected, void *context)
+{
+    comm_t *connection;
+    socklen_t sl;
+    char buf[INET6_ADDRSTRLEN + 7];
+    char *s;
+    
+    connection = calloc(1, sizeof *connection);
+    if (connection == NULL) {
+        ERROR("No memory for connection structure.");
+        return NULL;
+    }
+    if (inet_ntop(remote_address->sa.sa_family, (remote_address->sa.sa_family == AF_INET
+                                                 ? (void *)&remote_address->sin.sin_addr
+                                                 : (void *)&remote_address->sin6.sin6_addr), buf, INET6_ADDRSTRLEN) == NULL) {
+        ERROR("inet_ntop failed to convert remote address: %s", strerror(errno));
+        free(connection);
+        return NULL;
+    }
+    s = buf + strlen(buf);
+    sprintf(s, "%%%hu", ntohs(remote_address->sa.sa_family == AF_INET
+                              ? remote_address->sin.sin_port
+                              : remote_address->sin6.sin6_port));
+    connection->name = strdup(buf);
+    if (!connection->name) {
+        free(connection);
+        return NULL;
+    }
+    connection->io.sock = socket(remote_address->sa.sa_family, SOCK_STREAM, IPPROTO_TCP);
+    if (connection->io.sock < 0) {
+        ERROR("Can't get socket: %s", strerror(errno));
+        comm_free(connection);
+        return NULL;
+    }
+    connection->address = *remote_address;
+    if (fcntl(connection->io.sock, F_SETFL, O_NONBLOCK) < 0) {
+        ERROR("connect_to_host: %s: Can't set O_NONBLOCK: %s", connection->name, strerror(errno));
+        comm_free(connection);
+        return NULL;
+    }
+#ifdef NOT_HAVE_SA_LEN
+    sl = (remote_address->sa.sa_family == AF_INET
+          ? sizeof remote_address->sin
+          : sizeof remote_address->sin6);
+#else
+    sl = remote_address->sa.sa_len;
+#endif
+    // Connect to the host
+    if (connect(connection->io.sock, &connection->address.sa, sl) < 0) {
+        if (errno != EINPROGRESS && errno != EAGAIN) {
+            ERROR("Can't connect to %s: %s", connection->name, strerror(errno));
+            comm_free(connection);
+            return NULL;
+        }
+    }
+    // At this point we do not yet have a connection, but the connection should be in progress,
+    // and we should get a write select event when the connection succeeds or fails.
+
+    if (tls) {
+        connection->tls_context = (tls_context_t *)-1;
+    }
+    
+    add_writer(&connection->io, connect_callback);
+    connection->connected = connected;
+    connection->disconnected = disconnected;
+    connection->datagram_callback = datagram_callback;
+    return connection;
 }
 
 // Local Variables:
