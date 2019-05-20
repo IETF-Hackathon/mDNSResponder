@@ -112,7 +112,7 @@ typedef struct dns_rdata_aaaa dns_rdata_aaaa_t;
 struct dns_rdata_aaaa {
     struct in6_addr *NONNULL addrs;
     int num;
-} aaaa;
+};
 
 typedef struct dns_rdata_srv dns_rdata_srv_t;
 struct dns_rdata_srv {
@@ -120,7 +120,7 @@ struct dns_rdata_srv {
     uint16_t priority;
     uint16_t weight;
     uint16_t port;
-} srv;
+};
 
 typedef struct dns_rdata_sig dns_rdata_sig_t;
 struct dns_rdata_sig {
@@ -135,7 +135,7 @@ struct dns_rdata_sig {
     int start;
     int len;
     uint8_t *NONNULL signature;
-} sig;
+};
 
 typedef struct dns_rdata_key dns_rdata_key_t;
 struct dns_rdata_key {
@@ -144,7 +144,7 @@ struct dns_rdata_key {
     uint8_t algorithm;
     int len;
     uint8_t *NONNULL key;
-} key;
+};
 
 typedef struct dns_rr dns_rr_t;
 struct dns_rr {
@@ -424,13 +424,18 @@ bool dns_wire_parse(dns_message_t *NONNULL *NULLABLE ret, dns_wire_t *NONNULL me
 bool dns_names_equal(dns_label_t *NONNULL name1, dns_label_t *NONNULL name2);
 
 // wireutils.c
+dns_name_t *NULLABLE dns_name_copy(dns_name_t *NONNULL original);
+void dns_u48_to_wire(dns_towire_state_t *NONNULL txn, uint64_t val);
 void dns_concatenate_name_to_wire(dns_towire_state_t *NONNULL towire,
                                   dns_name_t *NULLABLE labels_prefix, const char *NULLABLE prefix, const char *NULLABLE suffix);
+const char *NONNULL dns_name_print_to_limit(dns_name_t *NONNULL name, dns_name_t *NULLABLE limit, char *NULLABLE buf, int bufmax);
 const char *NONNULL dns_name_print(dns_name_t *NONNULL name, char *NONNULL buf, int bufmax);
 bool dns_labels_equal(const char *NONNULL label1, const char *NONNULL label2, size_t len);
 bool dns_names_equal_text(dns_label_t *NONNULL name1, const char *NONNULL name2);
 size_t dns_name_wire_length(dns_label_t *NONNULL name);
 size_t dns_name_to_wire_canonical(uint8_t *NONNULL buf, size_t max, dns_label_t *NONNULL name);
+dns_name_t *NULLABLE dns_pres_name_parse(const char *NONNULL pname);
+dns_name_t *NULLABLE dns_name_subdomain_of(dns_name_t *NONNULL name, dns_name_t *NONNULL domain);
 
 #endif // _DNS_MSG_H
 
