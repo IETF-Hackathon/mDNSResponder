@@ -39,12 +39,55 @@
 
 // We need the compression routines from DNSCommon.c, but we can't link to it because that
 // pulls in a _lot_ of stuff we don't want.   The solution?   Define STANDALONE (this is done
-// in the Mkaefile, and include DNSCommon.c.
+// in the Makefile, and include DNSCommon.c.
 //
 // The only functions that aren't excluded by STANDALONE are FindCompressionPointer and
 // putDomainNameAsLabels.
 
 #include "DNSCommon.c"
+
+dns_name_t *
+dns_name_copy(dns_name_t *original)
+{
+    dns_name_t *ret = NULL, **cur = &ret;
+    dns_name_t *next;
+
+    for (next = original; next; next = next->next) {
+        *cur = calloc(1, 1 + next->len + (sizeof *cur) - DNS_MAX_LABEL_SIZE);
+        if (*cur == NULL) {
+            if (ret != NULL) {
+                dns_name_free(ret);
+            }
+            return NULL;
+        }
+        if (next->len) {
+            memcpy((*cur)->data, next->data, next->len + 1);
+        }
+        (*cur)->len = next->len;
+        cur = &((*cur)->next);
+    }
+    return ret;
+}
+
+// Needed for TSIG (RFC2845).
+void
+dns_u48_to_wire(dns_towire_state_t *NONNULL txn,
+                uint64_t val)
+{
+    if (!txn->error) {
+        if (txn->p + 6 >= txn->lim) {
+            txn->error = ENOBUFS;
+            txn->truncated = true;
+            return;
+        }
+        *txn->p++ = val >> 40;
+        *txn->p++ = (val >> 32) & 0xff;
+        *txn->p++ = (val >> 24) & 0xff;
+        *txn->p++ = (val >> 16) & 0xff;
+        *txn->p++ = (val >> 8) & 0xff;
+        *txn->p++ = val & 0xff;
+    }
+}
 
 void
 dns_concatenate_name_to_wire(dns_towire_state_t *towire, dns_name_t *labels_prefix, const char *prefix, const char *suffix)
@@ -53,6 +96,10 @@ dns_concatenate_name_to_wire(dns_towire_state_t *towire, dns_name_t *labels_pref
     dns_towire_state_t namewire;
     mDNSu8 *ret;
 
+    // Don't do all this work if we're already past an error.
+    if (towire->error) {
+        return;
+    }
     memset(&namewire, 0, sizeof namewire);
     namewire.message = &namebuf;
     namewire.lim = &namebuf.data[DNS_DATA_SIZE];
@@ -62,7 +109,7 @@ dns_concatenate_name_to_wire(dns_towire_state_t *towire, dns_name_t *labels_pref
     } else if (labels_prefix != NULL) {
         int bytes_written;
 
-        if (!towire->error) {
+        if (!namewire.error) {
             bytes_written = dns_name_to_wire_canonical(namewire.p, namewire.lim - namewire.p, labels_prefix);
             // This can never occur with a valid name.
             if (bytes_written == 0) {
@@ -74,6 +121,10 @@ dns_concatenate_name_to_wire(dns_towire_state_t *towire, dns_name_t *labels_pref
     }
     if (suffix != NULL) {
         dns_full_name_to_wire(NULL, &namewire, suffix);
+    }
+    if (namewire.error) {
+        towire->truncated = namewire.truncated;
+        towire->error = namewire.error;
     }
 
     ret = putDomainNameAsLabels((DNSMessage *)towire->message, towire->p, towire->lim, (domainname *)namebuf.data);
@@ -92,8 +143,10 @@ dns_concatenate_name_to_wire(dns_towire_state_t *towire, dns_name_t *labels_pref
     }
 }
 
+// Convert a dns_name_t to presentation format.   Stop conversion at the specified limit.
+// A trailing dot is only written if a null label is present.
 const char *NONNULL
-dns_name_print(dns_name_t *NONNULL name, char *buf, int bufmax)
+dns_name_print_to_limit(dns_name_t *NONNULL name, dns_name_t *NULLABLE limit, char *buf, int bufmax)
 {
     dns_label_t *lp;
     int ix = 0;
@@ -102,7 +155,7 @@ dns_name_print(dns_name_t *NONNULL name, char *buf, int bufmax)
     // Copy the labels in one at a time, putting a dot between each one; if there isn't room
     // in the buffer (shouldn't be the case), copy as much as will fit, leaving room for a NUL
     // termination.
-    for (lp = name; lp; lp = lp->next) {
+    for (lp = name; lp != limit && lp != NULL; lp = lp->next) {
         if (ix != 0) {
             if (ix + 2 >= bufmax) {
                 break;
@@ -131,6 +184,12 @@ dns_name_print(dns_name_t *NONNULL name, char *buf, int bufmax)
     }
     buf[ix++] = 0;
     return buf;
+}
+
+const char *NONNULL
+dns_name_print(dns_name_t *NONNULL name, char *buf, int bufmax)
+{
+    return dns_name_print_to_limit(name, NULL, buf, bufmax);
 }
 
 bool
@@ -231,8 +290,6 @@ dns_names_equal_text(dns_label_t *NONNULL name1, const char *NONNULL name2)
 }
 
 // Find the length of a name in uncompressed wire format.
-// This is in fromwire because we use it for validating signatures, and don't need it for
-// sending.
 static size_t
 dns_name_wire_length_in(dns_label_t *NONNULL name, size_t ret)
 {
@@ -272,6 +329,91 @@ dns_name_to_wire_canonical(uint8_t *NONNULL buf, size_t max, dns_label_t *NONNUL
     return dns_name_to_wire_canonical_in(buf, max, 0, name);
 }
     
+// Parse a NUL-terminated text string into a sequence of labels.
+dns_name_t *
+dns_pres_name_parse(const char *pname)
+{
+    const char *dot, *s;
+    dns_label_t *next, *ret, **prev = &ret;
+    int len;
+    char *t;
+    char buf[DNS_MAX_LABEL_SIZE];
+    ret = NULL;
+    
+    do {
+        dot = strchr(pname, '.');
+        if (dot == NULL) {
+            dot = pname + strlen(pname);
+        }
+        len = dot - pname;
+        if (len > 0) {
+            t = buf;
+            for (s = pname; s < dot; s++) {
+                if (*s == '\\') { // already bounds checked
+                    int v0 = s[1] - '0';
+                    int v1 = s[2] - '0';
+                    int v2 = s[3] - '0';
+                    int val = v0 * 100 + v1 * 10 + v2;
+                    if (val > 255) {
+                        goto fail;
+                    }
+                    s += 3;
+                    *t++ = val;
+                } else {
+                    *t++ = *s;
+                }
+            }
+            len = t - buf;
+        }
+        next = calloc(1, len + 1 + (sizeof *next) - DNS_MAX_LABEL_SIZE);
+        if (next == NULL) {
+            goto fail;
+        }
+        *prev = next;
+        prev = &next->next;
+        next->len = dot - pname;
+        if (next->len > 0) {
+            memcpy(next->data, buf, next->len);
+        }
+        next->data[next->len] = 0;
+    } while (dot[0] == '.' && len > 0);
+    return ret;
+    
+fail:
+    if (ret) {
+        dns_name_free(ret);
+    }
+    return NULL;
+}
+
+// See if name is a subdomain of domain.   If so, return a pointer to the label in name
+// where the match to domain begins.
+dns_name_t *
+dns_name_subdomain_of(dns_name_t *name, dns_name_t *domain)
+{
+    int dnum = 0, nnum = 0;
+    dns_name_t *np, *dp;
+
+    for (dp = domain; dp; dp = dp->next) {
+        dnum++;
+    }
+    for (np = name; np; np = np->next) {
+        nnum++;
+    }
+    if (nnum < dnum) {
+        return NULL;
+    }
+    for (np = name; np; np = np->next) {
+        if (nnum-- == dnum) {
+            break;
+        }
+    }
+    if (dns_names_equal(np, domain)) {
+        return np;
+    }
+    return NULL;
+}
+
 // Local Variables:
 // mode: C
 // tab-width: 4
