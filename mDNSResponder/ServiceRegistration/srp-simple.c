@@ -25,6 +25,7 @@
 #include <arpa/inet.h>
 #include <string.h>
 #include <stdlib.h>
+#include <unistd.h>
 
 #include "srp.h"
 #include "dns-msg.h"
