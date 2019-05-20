@@ -36,8 +36,11 @@ struct tls_context {
 
 // tls_*.c:
 bool srp_tls_init(void);
+bool srp_tls_client_init(void);
+bool srp_tls_server_init(void);
 bool srp_tls_accept_setup(comm_t *NONNULL comm);
 bool srp_tls_listen_callback(comm_t *NONNULL comm);
+bool srp_tls_connect_callback(comm_t *NONNULL comm);
 ssize_t srp_tls_read(comm_t *NONNULL comm, unsigned char *NONNULL buf, size_t max);
 void srp_tls_context_free(comm_t *NONNULL comm);
 ssize_t srp_tls_write(comm_t *NONNULL comm, struct iovec *NONNULL iov, int iov_len);
