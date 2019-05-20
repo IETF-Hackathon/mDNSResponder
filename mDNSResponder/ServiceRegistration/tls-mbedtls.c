@@ -44,7 +44,8 @@ mbedtls_ctr_drbg_context ctr_drbg;
 mbedtls_x509_crt cacert_struct, *cacert = NULL;
 mbedtls_x509_crt srvcert_struct, *srvcert = NULL;
 mbedtls_pk_context srvkey;
-mbedtls_ssl_config tls_config;
+mbedtls_ssl_config tls_server_config;
+mbedtls_ssl_config tls_client_config;
 
 const char *cacert_file = NULL;
 const char *srvcert_file = "server.crt";
@@ -61,6 +62,42 @@ srp_tls_init(void)
     mbedtls_entropy_init(&entropy);
     mbedtls_ctr_drbg_init(&ctr_drbg);
 
+    status = mbedtls_ctr_drbg_seed(&ctr_drbg, mbedtls_entropy_func, &entropy, NULL, 0);
+    if (status != 0) {
+        ERROR("Unable to seed RNG: %x", -status);
+        return false;
+    }
+    return true;
+}
+
+static bool
+mbedtls_config_init(mbedtls_ssl_config *config, int flags)
+{
+    int status = mbedtls_ssl_config_defaults(config, flags,
+                                             MBEDTLS_SSL_TRANSPORT_STREAM, MBEDTLS_SSL_PRESET_DEFAULT);
+    if (status != 0) {
+        ERROR("Unable to set up default TLS config state: %x", -status);
+        return false;
+    }
+
+    mbedtls_ssl_conf_rng(config, mbedtls_ctr_drbg_random, &ctr_drbg);
+    return true;
+}
+
+bool
+srp_tls_client_init(void)
+{
+    if (!mbedtls_config_init(&tls_client_config, MBEDTLS_SSL_IS_CLIENT)) {
+        return false;
+    }
+    return true;
+}
+
+bool
+srp_tls_server_init(void)
+{
+    int status;
+    
     // Load the public key and cert
     if (cacert_file != NULL) {
         status = mbedtls_x509_crt_parse_file(&cacert_struct, cacert_file);
@@ -91,30 +128,19 @@ srp_tls_init(void)
         }
     }
 
-    status = mbedtls_ctr_drbg_seed(&ctr_drbg, mbedtls_entropy_func, &entropy, NULL, 0);
-    if (status != 0) {
-        ERROR("Unable to seed RNG: %x", -status);
+    if (!mbedtls_config_init(&tls_server_config, MBEDTLS_SSL_IS_SERVER)) {
         return false;
     }
-
-    status = mbedtls_ssl_config_defaults(&tls_config, MBEDTLS_SSL_IS_SERVER,
-                                         MBEDTLS_SSL_TRANSPORT_STREAM, MBEDTLS_SSL_PRESET_DEFAULT);
-    if (status != 0) {
-        ERROR("Unable to set up default TLS config state: %x", -status);
-        return false;
-    }
-
-    mbedtls_ssl_conf_rng(&tls_config, mbedtls_ctr_drbg_random, &ctr_drbg);
+    
     if (cacert != NULL) {
-        mbedtls_ssl_conf_ca_chain(&tls_config, cacert, NULL);
+        mbedtls_ssl_conf_ca_chain(&tls_server_config, cacert, NULL);
     }
 
-    status = mbedtls_ssl_conf_own_cert(&tls_config, srvcert, &srvkey);
+    status = mbedtls_ssl_conf_own_cert(&tls_server_config, srvcert, &srvkey);
     if (status != 0) {
         ERROR("Unable to configure own cert: %x", -status);
         return false;
     }
-
     return true;
 }
 
@@ -164,9 +190,38 @@ srp_tls_listen_callback(comm_t *comm)
     if (comm->tls_context == NULL) {
         return false;
     }
-    status = mbedtls_ssl_setup(&comm->tls_context->context, &tls_config);
+    status = mbedtls_ssl_setup(&comm->tls_context->context, &tls_server_config);
     if (status != 0) {
         ERROR("Unable to set up TLS listener state: %x", -status);
+        return false;
+    }
+
+    // Set up the I/O functions.
+    mbedtls_ssl_set_bio(&comm->tls_context->context, comm, srp_tls_io_send, srp_tls_io_recv, NULL);
+
+    // Start the TLS handshake.
+    status = mbedtls_ssl_handshake(&comm->tls_context->context);
+    if (status != 0 && status != MBEDTLS_ERR_SSL_WANT_READ && status != MBEDTLS_ERR_SSL_WANT_WRITE) {
+        ERROR("TLS handshake failed: %x", -status);
+        srp_tls_context_free(comm);
+        ioloop_close(&comm->io);
+    }
+    return true;
+}
+
+bool
+srp_tls_connect_callback(comm_t *comm)
+{
+    int status;
+
+    // Allocate the TLS config and state structures.
+    comm->tls_context = calloc(1, sizeof *comm->tls_context);
+    if (comm->tls_context == NULL) {
+        return false;
+    }
+    status = mbedtls_ssl_setup(&comm->tls_context->context, &tls_client_config);
+    if (status != 0) {
+        ERROR("Unable to set up TLS connect state: %x", -status);
         return false;
     }
 
