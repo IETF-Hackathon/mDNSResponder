@@ -1,6 +1,6 @@
 /* srp-gw.c
  *
- * Copyright (c) 2018 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2018-2019 Apple Computer, Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -58,22 +58,12 @@
 #include "srp-crypto.h"
 #include "ioloop.h"
 #include "dnssd-proxy.h"
+#include "srp-gw.h"
+#include "config-parse.h"
 
-typedef struct subnet subnet_t;
-struct subnet {
-    subnet_t *NULLABLE next;
-    uint8_t preflen;
-    uint8_t family;
-    char bytes[8];
-};
-
-typedef struct udp_validator udp_validator_t;
-struct udp_validator {
-    udp_validator_t *NULLABLE next;
-    char *NONNULL ifname;
-    int ifindex;
-    subnet_t *subnets;
-};
+static addr_t dns_server;
+static dns_name_t *service_update_zone; // The zone to update when we receive an update for default.service.arpa.
+static tsig_key_t *key;
 
 static int
 usage(const char *progname)
@@ -91,42 +81,785 @@ usage(const char *progname)
     return 1;
 }
 
-typedef struct delete delete_t;
-struct delete {
-    delete_t *next;
-    dns_name_t *name;
+void
+name_to_wire(dns_towire_state_t *towire, dns_name_t *name)
+{
+    // Does compression...
+    dns_concatenate_name_to_wire(towire, name, NULL, NULL);
+}
+
+void
+rdata_to_wire(dns_towire_state_t *towire, dns_rr_t *rr)
+{
+    dns_txt_element_t *txt;
+    
+    dns_rdlength_begin(towire);
+
+    // These are the only types we expect to see.  If something else were passed, it would be written as rdlen=0.
+    switch(rr->type) {
+    case dns_rrtype_ptr:
+        name_to_wire(towire, rr->data.ptr.name);
+        break;
+
+    case dns_rrtype_srv:
+        dns_u16_to_wire(towire, rr->data.srv.priority);
+        dns_u16_to_wire(towire, rr->data.srv.weight);
+        dns_u16_to_wire(towire, rr->data.srv.port);
+        name_to_wire(towire, rr->data.srv.name);
+        break;
+
+    case dns_rrtype_txt:
+        for (txt = rr->data.txt; txt != NULL; txt = txt->next) {
+            dns_u8_to_wire(towire, txt->len);
+            dns_rdata_raw_data_to_wire(towire, txt->data, txt->len);
+        }
+        break;
+        
+    case dns_rrtype_key:
+        dns_u16_to_wire(towire, rr->data.key.flags);
+        dns_u8_to_wire(towire, rr->data.key.protocol);
+        dns_u8_to_wire(towire, rr->data.key.algorithm);
+        dns_rdata_raw_data_to_wire(towire, rr->data.key.key, rr->data.key.len);
+        break;
+
+    case dns_rrtype_a:
+        dns_rdata_raw_data_to_wire(towire, rr->data.a.addrs, sizeof *rr->data.a.addrs);
+        break;
+
+    case dns_rrtype_aaaa:
+        dns_rdata_raw_data_to_wire(towire, rr->data.aaaa.addrs, sizeof *rr->data.aaaa.addrs);
+        break;
+    }
+
+    dns_rdlength_end(towire);
+}
+
+// We only list the types we are using--there are other types that we don't support.
+typedef enum prereq_type prereq_type_t;
+enum prereq_type {
+    update_rrset_equals,     // RFC 2136 section 2.4.2: RRset Exists (Value Dependent)
+    update_name_not_in_use,  // RFC 2136 section 2.4.5: Name Is Not In Use
 };
 
-typedef struct dns_host_description dns_host_description_t;
-struct dns_host_description {
-    dns_name_t *name;
-    dns_rr_t *a, *aaaa, *key;
-    delete_t *delete;
-    int num_instances;
+void
+add_prerequisite(dns_wire_t *msg, dns_towire_state_t *towire, prereq_type_t ptype, dns_name_t *name, dns_rr_t *rr)
+{
+    char namebuf[DNS_MAX_NAME_SIZE + 1];
+    if (ntohs(msg->nscount) != 0 || ntohs(msg->arcount) != 0) {
+        ERROR("%s: adding prerequisite after updates", dns_name_print(name, namebuf, sizeof namebuf));
+        towire->truncated = true;
+    }
+    name_to_wire(towire, name);
+    switch(ptype) {
+    case update_rrset_equals:
+        dns_u16_to_wire(towire, rr->type);
+        dns_u16_to_wire(towire, rr->qclass);
+        dns_ttl_to_wire(towire, 0);
+        rdata_to_wire(towire, rr);
+        break;
+    case update_name_not_in_use:
+        dns_u16_to_wire(towire, dns_rrtype_any);   // TYPE
+        dns_u16_to_wire(towire, dns_qclass_none);  // CLASS
+        dns_ttl_to_wire(towire, 0);                // TTL
+        dns_u16_to_wire(towire, 0);                // RDLEN
+        break;
+    }
+    msg->ancount = htons(ntohs(msg->ancount) + 1);
+}
+
+// We actually only support one type of delete, so it's a bit silly to specify it, but in principle we might
+// want more later.
+typedef enum delete_type delete_type_t;
+enum delete_type {
+    delete_name, // RFC 2136 section 2.5.3: Delete all RRsets from a name
 };
 
-typedef struct service_instance service_instance_t;
-struct service_instance {
-    service_instance_t *next;
-    dns_host_description_t *host_description;
-    dns_name_t *name;
-    delete_t *delete;
-    int num_instances;
-    dns_rr_t *srv, *txt;
-};
+void
+add_delete(dns_wire_t *msg, dns_towire_state_t *towire, delete_type_t dtype, dns_name_t *name)
+{
+    switch(dtype) {
+    case delete_name:
+        dns_u16_to_wire(towire, dns_rrtype_any);   // TYPE
+        dns_u16_to_wire(towire, dns_qclass_none);  // CLASS
+        dns_ttl_to_wire(towire, 0);                // TTL
+        dns_u16_to_wire(towire, 0);                // RDLEN
+        break;
+    }
+    msg->nscount = htons(ntohs(msg->nscount) + 1);
+}
 
-typedef struct service service_t;
-struct service {
-    service_t *next;
+// Copy the RR we received in the SRP update out in wire format.
+
+void
+add_rr(dns_wire_t *msg, dns_towire_state_t *towire, dns_name_t *name, dns_rr_t *rr)
+{
+    dns_u16_to_wire(towire, rr->type);   // TYPE
+    dns_u16_to_wire(towire, rr->qclass); // CLASS
+    dns_ttl_to_wire(towire, rr->ttl);    // TTL
+    rdata_to_wire(towire, rr);           // RDLEN
+    msg->nscount = htons(ntohs(msg->nscount) + 1);
+}
+
+// Construct an update of the specified type, assuming that the record being updated
+// either exists or does not exist, depending on the value of exists.   Actual records
+// to be update are taken from the update_t.
+//
+// Analysis:
+//
+// The goal of the update is to either bring the zone to the state described in the SRP update, or
+// determine that the state described in the SRP update conflicts with what is already present in
+// the zone.
+//
+// Possible scenarios:
+// 1. Update and Zone are the same (A and AAAA records may differ):
+//    Prerequisites:
+//    a. for each instance: KEY RR exists on instance name and is the same
+//    b. for host: KEY RR exists on host name and is the same
+//    Update:
+//    a. for each instance: delete all records on instance name, add KEY RR, add SRV RR, add TXT RR
+//    b. for host: delete host instance, add A, AAAA and KEY RRs
+//    c. for each service: add PTR record pointing on service name to service instance name
+//
+// We should try 1 first, because it should be the steady state case; that is, it should be what happens
+// most of the time.
+// If 1 fails, then we could have some service instances present and others not.   There is no way to
+// know without trying.   We can at this point either try to add each service instance in a separate update,
+// or assume that none are present and add them all at once, and then if this fails add them individually.
+// I think that it makes sense to try them all first, because that should be the second most common case:
+//
+// 2. Nothing in update is present in zone:
+//    Prerequisites:
+//    a. For each instance: instance name is not in use
+//    b. Host name is not in use
+//    Update:
+//    a. for each instance: add KEY RR, add SRV RR, add TXT RR on instance name
+//    b. for host: add A, AAAA and KEY RRs on host name
+//    c. for each service: add PTR record pointing on service name to service instance name
+//    
+// If either (1) or (2) works, we're done.   If both fail, then we need to do the service instance updates
+// and host update one by one.   This is a bit nasty because we actually have to try twice: once assuming
+// the RR exists, and once assuming it doesn't.   If any of the instance updates fail, or the host update
+// fails, we delete all the ones that succeeded.
+//
+// In the cases other than (1) and (2), we can add all the service PTRs in the host update, because they're
+// only added if the host update succeeds; if it fails, we have to go back and remove all the service
+// instances.
+//
+// One open question for the SRP document: we probably want to signal whether the conflict is with the
+// hostname or one of the service instance names.   We can do this with an EDNS(0) option.
+//
+// The flow will be:
+// - Try to update assuming everything is there already (case 1)
+// - Try to update assuming nothing is there already (case 2)
+// - For each service instance:
+//   - Try to update assuming it's not there; if this succeeds, add this instance to the list of
+//     instances that have been added. If not:
+//     - Try to update assuming it is there
+//     - If this fails, go to fail
+// - Try to update the host (and also services) assuming the host is not there.   If this fails:
+//   - Try to update the host (and also services) assuming the host is there.  If this succeeds:
+//     - return success
+// fail:
+// - For each service instance in the list of instances that have been added:
+//   - delete all records on the instance name.
+//
+// One thing that isn't accounted for here: it's possible that a previous update added some but not all
+// instances in the current update.  Subsequently, some other device may have claimed an instance that is
+// present but in conflict in the current update.   In this case, all of the instances prior to that one
+// in the update will actually have been updated by this update, but then the update as a whole will fail.
+// I think this is unlikely to be an actual problem, and there's no way to address it without a _lot_ of
+// complexity.
+
+void
+construct_update(update_t *update)
+{
+    dns_towire_state_t towire;
+    dns_wire_t *msg = update->update; // Solely to reduce the amount of typing.
     service_instance_t *instance;
-    dns_name_t *name;
-    dns_rr_t *rr;
-};
+    service_t *service;
+
+    // Set up the message constructor
+    towire.p = &msg->data[0];  // We start storing RR data here.
+    update->update_length = 0;
+    towire.lim = &msg->data[0] + update->update_max; // This is the limit to how much we can store.
+    towire.message = msg;
+    towire.p_rdlength = NULL;
+    towire.p_opt = NULL;
+
+    // Initialize the update message...
+    memset(msg, 0, DNS_HEADER_SIZE);
+    dns_qr_set(msg, dns_qr_query);
+    dns_opcode_set(msg, dns_opcode_update);
+    msg->id = srp_random16();
+
+    // An update always has one question, which is the zone name.
+    msg->qdcount = htons(1);
+    name_to_wire(&towire, update->zone_name);
+    dns_u16_to_wire(&towire, dns_rrtype_soa);
+    dns_u16_to_wire(&towire, dns_qclass_in);
+
+    switch(update->state) {
+    case connect_to_server:
+        ERROR("Update construction requested when still connecting.");
+        update->update_length = 0;
+        return;
+        
+        // Do a DNS Update for a service instance
+    case refresh_existing:
+        // Add a "KEY exists and is <x> and a PTR exists and is <x> prerequisite for each instance being updated.
+        for (instance = update->instances; instance; instance = instance->next) {
+            add_prerequisite(msg, &towire, update_rrset_equals, instance->name, update->host->key);
+        }
+        add_prerequisite(msg, &towire, update_rrset_equals, update->host->name, update->host->key);
+        // Now add a delete for each service instance
+        for (instance = update->instances; instance; instance = instance->next) {
+            add_delete(msg, &towire, delete_name, instance->name);
+        }
+        add_delete(msg, &towire, delete_name, update->host->name);
+
+    add_instances:
+        // Now add the update for each instance.
+        for (instance = update->instances; instance; instance = instance->next) {
+            add_rr(msg, &towire, instance->name, update->host->key);
+            add_rr(msg, &towire, instance->name, instance->srv);
+            add_rr(msg, &towire, instance->name, instance->txt);
+        }
+        // Add the update for each service
+        for (service = update->services; service; service = service->next) {
+            add_rr(msg, &towire, service->rr->name, service->rr);
+        }
+        // Add the host records...
+        add_rr(msg, &towire, update->host->name, update->host->key);
+        add_rr(msg, &towire, update->host->name, update->host->a);
+        add_rr(msg, &towire, update->host->name, update->host->aaaa);
+        break;
+
+    case create_nonexistent:
+        // Add a "name not in use" prerequisite for each instance being updated.
+        for (instance = update->instances; instance; instance = instance->next) {
+            add_prerequisite(msg, &towire, update_name_not_in_use, instance->name, (dns_rr_t *)NULL);
+        }
+        add_prerequisite(msg, &towire, update_name_not_in_use, update->host->name, (dns_rr_t *)NULL);
+        goto add_instances;
+        
+    case create_nonexistent_instance:
+        // The only prerequisite is that this specific service instance doesn't exist.
+        add_prerequisite(msg, &towire, update_name_not_in_use, update->instance->name, (dns_rr_t *)NULL);
+        goto add_instance;
+
+    case refresh_existing_instance:
+        // If instance already exists, prerequisite is that it has the same key, and we also have to
+        // delete all RRs on the name before adding our RRs, in case they have changed.
+        add_prerequisite(msg, &towire, update_rrset_equals, update->instance->name, update->host->key);
+        add_delete(msg, &towire, delete_name, update->instance->name);
+    add_instance:
+        add_rr(msg, &towire, update->instance->name, update->host->key);
+        add_rr(msg, &towire, update->instance->name, update->instance->srv);
+        add_rr(msg, &towire, update->instance->name, update->instance->txt);
+        break;
+        
+    case create_nonexistent_host:
+        add_prerequisite(msg, &towire, update_name_not_in_use, update->host->name, (dns_rr_t *)NULL);
+        goto add_host;
+
+    case refresh_existing_host:
+        add_prerequisite(msg, &towire, update_rrset_equals, update->host->name, update->host->key);
+        add_delete(msg, &towire, delete_name, update->host->name);
+        // Add the service PTRs here--these don't need to be in a separate update, because if we get here
+        // the only thing that can make adding them not okay is if adding the host fails.
+        // Add the update for each service
+        for (service = update->services; service; service = service->next) {
+            add_rr(msg, &towire, service->rr->name, service->rr);
+        }
+    add_host:
+        // Add the host records...
+        add_rr(msg, &towire, update->host->name, update->host->key);
+        add_rr(msg, &towire, update->host->name, update->host->a);
+        add_rr(msg, &towire, update->host->name, update->host->aaaa);
+        break;
+
+    case delete_failed_instance:
+        // Delete all the instances we successfull added before discovering a problem.
+        // It is possible in principle that these could have been overwritten by some other
+        // process and we could be deleting the wrong stuff, but in practice this should
+        // never happen if these are legitimately managed by SRP.   Once a name has been
+        // claimed by SRP, it should continue to be managed by SRP until its lease expires
+        // and SRP deletes it, at which point it is of course fair game.
+        for (instance = update->instances; instance; instance = instance->next) {
+            add_delete(msg, &towire, delete_name, instance->name);
+        }
+        break;
+    }
+}
+
+void
+update_send(update_t *update)
+{
+    struct iovec iov[4];
+    dns_towire_state_t towire;
+    dns_wire_t *msg = update->update;
+    struct timeval tv;
+    uint8_t *p_mac;
+    
+    // Set up the message constructor
+    towire.p = &msg->data[0] + update->update_length;  // We start storing RR data here.
+    towire.lim = &msg->data[0] + update->update_max; // This is the limit to how much we can store.
+    towire.message = msg;
+    towire.p_rdlength = NULL;
+    towire.p_opt = NULL;
+
+    // If we have a key, sign the message with the key using TSIG HMAC-SHA256.
+    if (key != NULL) {
+        // Maintain an IOV with the bits of the message that we need to sign.
+        iov[0].iov_base = msg;
+
+        name_to_wire(&towire, key->name);
+        dns_u16_to_wire(&towire, dns_rrtype_tsig);       // RRTYPE
+        dns_u16_to_wire(&towire, dns_qclass_any);        // CLASS
+        dns_ttl_to_wire(&towire, 0);                     // TTL
+        // The message digest skips the RDLEN field.
+        iov[0].iov_len = (uint8_t *)iov[0].iov_base - towire.p;
+        dns_rdlength_begin(&towire);                     // RDLEN
+        iov[1].iov_base = towire.p;
+        dns_name_to_wire(NULL, &towire, "hmac-sha256."); // Algorithm Name
+        gettimeofday(&tv, NULL);
+        dns_u48_to_wire(&towire, tv.tv_sec);             // Time since epoch
+        dns_u16_to_wire(&towire, 300);                   // Fudge interval (clocks can be skewed by up to 5 minutes)
+        // Message digest doesn't cover MAC size or MAC fields, for obvious reasons.
+        iov[1].iov_len = (uint8_t *)iov[1].iov_base - towire.p;
+        dns_u16_to_wire(&towire, SRP_SHA256_HASH_SIZE);  // MAC Size
+        p_mac = towire.p;                                // MAC
+        if (!towire.error) {
+            if (towire.p + SRP_SHA256_HASH_SIZE >= towire.lim) {
+                towire.error = ENOBUFS;
+                towire.truncated = true;
+            } else {
+                towire.p += SRP_SHA256_HASH_SIZE;
+            }
+        }
+        iov[2].iov_base = towire.p;
+        dns_u16_to_wire(&towire, 0);                     // TSIG Error (always 0 on send).
+        dns_u16_to_wire(&towire, 0);                     // Other Len (MBZ?)
+        iov[2].iov_len = (uint8_t *)iov[2].iov_base - towire.p;
+        dns_rdlength_end(&towire);
+        
+        // Now mix in the secret.
+        iov[3].iov_base = key->secret;
+        iov[3].iov_len = key->length;
+        
+        // Okay, we have stored the TSIG signature, now compute the message digest.
+        srp_hmac_iov(SRP_HASH_TYPE_SHA256, p_mac, SRP_SHA256_HASH_SIZE, &iov[0], 4);
+        msg->arcount = htons(ntohs(msg->arcount) + 1);
+        update->update_length = (const uint8_t *)update->update - towire.p;
+    }
+    
+    // Transmit the update
+    iov[0].iov_base = update->update;
+    iov[0].iov_len = update->update_length;
+    update->connection->send_response(update->connection, update->message, iov, 1);
+}
+
+void
+update_finished(update_t *update, int rcode)
+{
+    // If success, construct a response
+    // If fail, send a quick status code
+    // Signal host name conflict and instance name conflict using different rcodes (?)
+}
+
+void
+update_connect_callback(comm_t *comm)
+{
+    update_t *update = comm->context;
+    
+    // Once we're connected, construct the first update.
+    INFO("Connected to %s.", comm->name);
+    // STATE CHANGE: connect_to_server -> refresh_existing
+    update->state = refresh_existing;
+    construct_update(update);
+    update_send(update);
+}
+
+const char *NONNULL
+update_state_name(update_t *update)
+{
+    switch(update->state) {
+    case connect_to_server:
+        return "connect_to_server";
+    case create_nonexistent:
+        return "create_nonexistent";
+    case refresh_existing:
+        return "refresh_existing";
+    case create_nonexistent_instance:
+        return "create_nonexistent_instance";
+    case refresh_existing_instance:
+        return "refresh_existing_instance";
+    case create_nonexistent_host:
+        return "create_nonexistent_host";
+    case refresh_existing_host:
+        return "refresh_existing_host";
+    case delete_failed_instance:
+        return "delete_failed_instance";
+    }
+    return "unknown state";
+}
+
+const char *
+rcode_name(dns_wire_t *wire)
+{
+    switch(dns_rcode_get(wire)) {
+    case dns_rcode_noerror:
+        return "No Error";
+    case dns_rcode_formerr:
+        return "Format Error";
+    case dns_rcode_servfail:
+        return "Server Failure";
+    case dns_rcode_nxdomain:
+        return "Non-Existent Domain";
+    case dns_rcode_notimp:
+        return "Not Implemented";
+    case dns_rcode_refused:
+        return "Query Refused";
+    case dns_rcode_yxdomain:
+        return "RFC6672] Name Exists when it should not";
+    case dns_rcode_yxrrset:
+        return "RR Set Exists when it should not";
+    case dns_rcode_nxrrset:
+        return "RR Set that should exist does not";
+    case dns_rcode_notauth:
+        return "Not Authorized";
+    case dns_rcode_notzone:
+        return "Name not contained in zone";
+    case dns_rcode_dsotypeni:
+        return "DSO-Type Not Implemented";
+    case dns_rcode_badvers:
+        return "TSIG Signature Failure";
+    case dns_rcode_badkey:
+        return "Key not recognized";
+    case dns_rcode_badtime:
+        return "Signature out of time window";
+    case dns_rcode_badmode:
+        return "Bad TKEY Mode";
+    case dns_rcode_badname:
+        return "Duplicate key name";
+    case dns_rcode_badalg:
+        return "Algorithm not supported";
+    case dns_rcode_badtrunc:
+        return "Bad Truncation";
+    case dns_rcode_badcookie:
+        return "Bad/missing Server Cookie";
+    default:
+        return "Unknown rcode.";
+    }        
+}
+
+void
+update_disconnect_callback(comm_t *comm, int error)
+{
+    update_t *update = comm->context;
+    
+    if (update->state == connect_to_server) {
+        INFO("%s disconnected: %s", comm->name, strerror(error));
+        update_finished(update, dns_rcode_servfail);
+    } else {
+        // This could be bad if any updates succeeded.
+        ERROR("%s disconnected during update in state %s: %s",
+              comm->name, update_state_name(update), strerror(error));
+        update_finished(update, dns_rcode_servfail);
+    }
+}
+
+void
+update_reply_callback(comm_t *comm)
+{
+    update_t *update = comm->context;
+    dns_wire_t *wire = &comm->message->wire;
+    char namebuf[DNS_MAX_NAME_SIZE + 1];
+    service_instance_t **pinstance;
+
+    INFO("Message from %s in state %s.", comm->name, update_state_name(update));
+    // Sanity check the response
+    if (dns_qr_get(wire) == dns_qr_query) {
+        ERROR("Received a query from the authoritative server!");
+        update_finished(update, dns_rcode_servfail);
+        return;
+    }
+    if (dns_opcode_get(wire) != dns_opcode_update) {
+        ERROR("Received a response with opcode %d from the authoritative server!",
+              dns_opcode_get(wire));
+        update_finished(update, dns_rcode_servfail);
+        return;
+    }
+    if (update->update == NULL) {
+        ERROR("Received a response from auth server when no update has been sent yet.");
+        update_finished(update, dns_rcode_servfail);
+    }
+    // This isn't an error in the protocol, because we might be pipelining.   But we _aren't_ pipelining,
+    // so there is only one message in flight.   So the message IDs should match.
+    if (update->update->id != wire->id) {
+        ERROR("Received a response from auth server with unknown ID.");
+        update_finished(update, dns_rcode_servfail);
+    }
+    
+    // Handle the case where the update succeeded.
+    switch(dns_rcode_get(wire)) {
+    case dns_rcode_noerror:
+        switch(update->state) {
+        case connect_to_server:  // Can't get a response when connecting.
+        invalid:
+            ERROR("Invalid rcode \"%s\" for state %s", rcode_name(wire), update_state_name(update));
+            update_finished(update, dns_rcode_servfail);
+            return;
+
+        case create_nonexistent:
+            INFO("SRP Update for host %s was freshly added.",
+                 dns_name_print(update->host->name, namebuf, sizeof namebuf));
+            update_finished(update, dns_rcode_noerror);
+            return;
+
+        case refresh_existing:
+            INFO("SRP Update for host %s was refreshed.",
+                 dns_name_print(update->host->name, namebuf, sizeof namebuf));
+            update_finished(update, dns_rcode_noerror);
+            return;
+
+        case create_nonexistent_instance:
+            INFO("Instance create for %s succeeded",
+                 dns_name_print(update->instance->name, namebuf, sizeof namebuf));
+            // If we created a new instance, we need to remember it in case we have to undo it.
+            // To do that, we have to take it off the list.
+            for (pinstance = &update->instances; *pinstance != NULL; pinstance = &((*pinstance)->next)) {
+                if (*pinstance == update->instance) {
+                    break;
+                }
+            }
+            *pinstance = update->instance->next;
+            // If there are no more instances to update, then do the host add.
+            if (*pinstance == NULL) {
+                // STATE CHANGE: create_nonexistent_instance -> create_nonexistent_host
+                update->state = create_nonexistent_host;
+            } else {
+                // Not done yet, do the next one.
+                update->instance = *pinstance;
+            }
+            construct_update(update);
+            update_send(update);
+            return;
+
+        case refresh_existing_instance:
+            INFO("Instance refresh for %s succeeded",
+                 dns_name_print(update->instance->name, namebuf, sizeof namebuf));
+
+            // Move on to the next instance to update.
+            update->instance = update->instance->next;
+            // If there are no more instances to update, then do the host add.
+            if (update->instance == NULL) {
+                // STATE CHANGE: refresh_existing_instance -> create_nonexistent_host
+                update->state = create_nonexistent_host;
+            } else {
+                // Not done yet, do the next one.
+                // STATE CHANGE: refresh_existing_instance -> create_nonexistent_instance
+                update->state = create_nonexistent_instance;
+            }
+            construct_update(update);
+            update_send(update);
+            return;
+
+        case create_nonexistent_host:
+            INFO("SRP Update for new host %s was successful.",
+                 dns_name_print(update->host->name, namebuf, sizeof namebuf));
+            update_finished(update, dns_rcode_noerror);
+            return;
+            
+        case refresh_existing_host:
+            INFO("SRP Update for existing host %s was successful.",
+                 dns_name_print(update->host->name, namebuf, sizeof namebuf));
+            update_finished(update, dns_rcode_noerror);
+            return;
+            
+        case delete_failed_instance:
+            INFO("Instance deletes for host %s succeeded",
+                 dns_name_print(update->host->name, namebuf, sizeof namebuf));
+            update_finished(update, update->fail_rcode);
+            return;
+        }
+
+        // We will get NXRRSET if we were adding an existing host with the prerequisite that a KEY
+        // RR exist on the name with the specified value.  Some other KEY RR may exist, or there may
+        // be no such RRSET; we can't tell from this response.
+    case dns_rcode_nxrrset:
+        switch(update->state) {
+        case connect_to_server:           // Can't get a response while connecting.
+        case create_nonexistent:          // Can't get nxdomain when creating.
+        case create_nonexistent_instance: // same
+        case create_nonexistent_host:     // same
+        case delete_failed_instance:      // There are no prerequisites for deleting failed instances, so
+                                          // in principle this should never fail.
+            goto invalid;
+
+        case refresh_existing:
+            // If we get an NXDOMAIN when doing a refresh, it means either that there is a conflict,
+            // or that one of the instances we are refreshing doesn't exist.   So now do the instances
+            // one at a time.
+
+            // STATE CHANGE: refresh_existing -> create_nonexistent
+            update->state = create_nonexistent;
+            update->instance = update->instances;
+            construct_update(update);
+            update_send(update);
+            return;
+
+        case refresh_existing_instance:
+            // In this case, we tried to update an existing instance and found that the prerequisite
+            // didn't match.   This means either that there is a conflict, or else that the instance
+            // expired and was deleted between the time that we attempted to create it and the time
+            // we attempted to update it.  We could account for this with an create_nonexistent_instance_again
+            // state, but currently do not.
+
+            // If we have added some instances, we need to delete them before we send the fail response.
+            if (update->added_instances != NULL) {
+                // STATE CHANGE: refresh_existing_instance -> delete_failed_instance
+                update->state = delete_failed_instance;
+            delete_added_instances:
+                update->instance = update->added_instances;
+                update->fail_rcode = dns_rcode_get(wire);
+                construct_update(update);
+                update_send(update);
+            } else {
+                update_finished(update, dns_rcode_get(wire));
+            }
+            return;
+
+        case refresh_existing_host:
+            // In this case, there is a conflicting host entry.  This means that all the service
+            // instances that exist and are owned by the key we are using are bogus, whether we
+            // created them or they were already there.  However, it is not our mission to remove
+            // pre-existing messes here, so we'll just delete the ones we added.
+            if (update->added_instances != NULL) {
+                // STATE CHANGE: refresh_existing_host -> delete_failed_instance
+                update->state = delete_failed_instance;
+                goto delete_added_instances;
+            }
+            update_finished(update, dns_rcode_get(wire));
+            return;
+        }
+        // We get YXDOMAIN if we specify a prerequisite that the name not exist, but it does exist.
+    case dns_rcode_yxdomain: 
+       switch(update->state) {
+        case connect_to_server:         // We can't get a response while connecting.
+        case refresh_existing:          // If we are refreshing, our prerequisites are all looking for
+        case refresh_existing_instance: // a specific RR with a specific value, so we can never get
+        case refresh_existing_host:     // YXDOMAIN.
+        case delete_failed_instance:    // And if we are deleting failed instances, we should never get an error.
+            goto invalid;
+            
+        case create_nonexistent:
+            // If we get an NXDOMAIN when doing a refresh, it means either that there is a conflict,
+            // or that one of the instances we are refreshing doesn't exist.   So now do the instances
+            // one at a time.
+
+            // STATE CHANGE: create_nonexistent -> create_nonexistent_instance
+            update->state = create_nonexistent_instance;
+            update->instance = update->instances;
+            construct_update(update);
+            update_send(update);
+            return;
+
+        case create_nonexistent_instance:
+            // STATE CHANGE: create_nonexistent_instance -> update_existing_instance
+            update->state = create_nonexistent_instance;
+            construct_update(update);
+            update_send(update);
+            return;
+            
+        case create_nonexistent_host:
+            // STATE CHANGE: create_nonexistent_host -> update_existing_host
+            update->state = create_nonexistent_host;
+            construct_update(update);
+            update_send(update);
+            return;
+    }
+       // We may want to return different error codes or do more informative logging for some of these:
+    case dns_rcode_formerr:
+    case dns_rcode_servfail:
+    case dns_rcode_notimp:
+    case dns_rcode_refused:
+    case dns_rcode_yxrrset:
+    case dns_rcode_notauth:
+    case dns_rcode_notzone:
+    case dns_rcode_dsotypeni:
+    default:
+        goto invalid;
+    }
+    // Not reached.
+}
+
+bool
+start_dns_update(message_t *message, dns_message_t *parsed_message, dns_host_description_t *host,
+                 service_instance_t *instance, service_t *service, dns_name_t *update_zone)
+{
+    update_t *update;
+    
+    // Allocate the data structure
+    update = calloc(1, sizeof *update);
+    if (update == NULL) {
+        ERROR("srp_relay: unable to allocate update structure!");
+        return false;
+    }
+    // Allocate the buffer in which updates will be constructed.
+    update->update = calloc(1, DNS_MAX_UDP_PAYLOAD);
+    if (update->update == NULL) {
+        ERROR("srp_relay: unable to allocate update message buffer.");
+        return false;
+    }
+    update->update_length = DNS_MAX_UDP_PAYLOAD;
+    
+    // Retain the stuff we're supposed to send.
+    update->host = host;
+    update->instances = instance;
+    update->services = service;
+    update->parsed_message = parsed_message;
+    update->message = message;
+    update->state = connect_to_server;
+    
+    // Start the connection to the server
+    update->connection = connect_to_host(&dns_server, false, update_reply_callback,
+                                         update_connect_callback, update_disconnect_callback, update);
+    if (update->connection == NULL) {
+        free(update);
+        return false;
+    }
+    return true;
+}
+
+bool
+replace_zone_name(dns_name_t **nzp_in, dns_name_t *uzp, dns_name_t *replacement_zone)
+{
+    dns_name_t **nzp = nzp_in;
+    while (*nzp != NULL && *nzp != uzp) {
+        nzp = &((*nzp)->next);
+    }
+    if (*nzp == NULL) {
+        ERROR("replace_zone: dns_name_subdomain_of returned bogus pointer.");
+        return false;
+    }
+
+    // Free the suffix we're replacing
+    dns_name_free(*nzp);
+
+    // Replace it.
+    *nzp = dns_name_copy(replacement_zone);
+    if (*nzp == NULL) {
+        ERROR("srp_relay: no memory for replacement zone");
+        return false;
+    }
+    return true;
+}
+
 
 bool
 srp_relay(comm_t *comm, dns_message_t *message)
 {
-    dns_name_t *update_zone;
     int i;
     dns_host_description_t *host_description = NULL;
     delete_t *deletes = NULL, *dp, **dpp = &deletes;
@@ -136,14 +869,15 @@ srp_relay(comm_t *comm, dns_message_t *message)
     char namebuf[DNS_MAX_NAME_SIZE + 1], namebuf1[DNS_MAX_NAME_SIZE + 1];
     bool ret = false;
     struct timeval now;
-    bool updating_services_dot_arpa = false;
+    dns_name_t *update_zone, *replacement_zone;
+    dns_name_t *uzp;
 
     // Update requires a single SOA record as the question
     if (message->qdcount != 1) {
         ERROR("srp_relay: update received with qdcount > 1");
         return false;
     }
-
+ 
     // Update should contain zero answers.
     if (message->ancount != 0) {
         ERROR("srp_relay: update received with ancount > 0");
@@ -155,14 +889,13 @@ srp_relay(comm_t *comm, dns_message_t *message)
               message->questions[0].type);
         return false;
     }
+
     update_zone = message->questions[0].name;
-
-    // What zone are we updating?
-    if (dns_names_equal_text(update_zone, "services.arpa")) {
-          updating_services_dot_arpa = true;
+    if (service_update_zone != NULL && dns_names_equal_text(update_zone, "default.service.arpa")) {
+        replacement_zone = service_update_zone;
+    } else {
+        replacement_zone = NULL;
     }
-
-    (void)updating_services_dot_arpa;
 
     // Scan over the authority RRs; do the delete consistency check.  We can't do other consistency checks
     // because we can't assume a particular order to the records other than that deletes have to come before
@@ -184,9 +917,18 @@ srp_relay(comm_t *comm, dns_message_t *message)
                 ERROR("srp_relay: no memory.");
                 goto out;
             }
-            dp->name = rr->name;
             *dpp = dp;
             dpp = &dp->next;
+
+            // Make sure the name is a subdomain of the zone being updated.
+            dp->zone = dns_name_subdomain_of(rr->name, update_zone);
+            if (dp->zone == NULL) {
+                ERROR("srp_relay: delete for record not in update zone %s: %s",
+                      dns_name_print(update_zone, namebuf1, sizeof namebuf),
+                      dns_name_print(rr->name, namebuf, sizeof namebuf));
+                goto out;
+            }
+            dp->name = rr->name;
         }
 
         // Otherwise if it's an A or AAAA record, it's part of a hostname entry.
@@ -214,6 +956,11 @@ srp_relay(comm_t *comm, dns_message_t *message)
                 }
                 host_description->delete = dp;
                 host_description->name = dp->name;
+                dp->consumed = true; // This delete is accounted for.
+
+                // In principle, we should be checking this name to see that it's a subdomain of the update
+                // zone.  However, it turns out we don't need to, because the /delete/ has to be a subdomain
+                // of the update zone, and we won't find that delete if it's not present.
             }
                           
             if (rr->type == dns_rrtype_a) {
@@ -265,6 +1012,7 @@ srp_relay(comm_t *comm, dns_message_t *message)
                     goto out;
                 }
                 sip->delete = dp;
+                dp->consumed = true;
                 sip->name = dp->name;
                 *sipp = sip;
                 sipp = &sip->next;
@@ -292,9 +1040,18 @@ srp_relay(comm_t *comm, dns_message_t *message)
                 ERROR("srp_relay: no memory");
                 goto out;
             }
-            sp->rr = rr;
             *spp = sp;
             spp = &sp->next;
+            sp->rr = rr;
+
+            // Make sure the service name is in the update zone.
+            sp->zone = dns_name_subdomain_of(sp->rr->name, update_zone);
+            if (sp->zone == NULL) {
+                ERROR("srp_relay: service name %s for %s is not in the update zone",
+                      dns_name_print(rr->name, namebuf, sizeof namebuf),
+                      dns_name_print(rr->data.ptr.name, namebuf1, sizeof namebuf1));
+                goto out;
+            }
         }            
 
         // Otherwise it's not a valid update
@@ -321,7 +1078,7 @@ srp_relay(comm_t *comm, dns_message_t *message)
                 // Note that we have already verified that there is only one service instance
                 // with this name, so this could only ever happen once in this loop even without
                 // the break statement.
-                sp->instance = sip;
+                sip->service = sp;
                 sip->num_instances++;
                 break;
             }
@@ -330,7 +1087,7 @@ srp_relay(comm_t *comm, dns_message_t *message)
         // update fails validation.
         if (sip == NULL) {
             ERROR("srp_relay: service %s points to an instance that's not included: %s",
-                  dns_name_print(sp->name, namebuf, sizeof namebuf),
+                  dns_name_print(sp->rr->name, namebuf, sizeof namebuf),
                   dns_name_print(sip->name, namebuf1, sizeof namebuf1));
             goto out;
         }
@@ -346,7 +1103,7 @@ srp_relay(comm_t *comm, dns_message_t *message)
 
         // For each service instance, make sure that it references the host description
         if (dns_names_equal(host_description->name, sip->srv->data.srv.name)) {
-            sip->host_description = host_description;
+            sip->host = host_description;
             host_description->num_instances++;
         }
     }
@@ -369,6 +1126,15 @@ srp_relay(comm_t *comm, dns_message_t *message)
         ERROR("srp_relay: host description %s doesn't contain a key.",
               dns_name_print(host_description->name, namebuf, sizeof namebuf));
         goto out;
+    }
+
+    // Make sure that all the deletes are for things that are then added.
+    for (dp = deletes; dp; dp = dp->next) {
+        if (!dp->consumed) {
+            ERROR("srp_relay: delete for which there is no subsequent add: %s",
+                  dns_name_print(host_description->name, namebuf, sizeof namebuf));
+            goto out;
+        }
     }
 
     // The signature should be the last thing in the additional section.   Even if the signature
@@ -415,8 +1181,59 @@ srp_relay(comm_t *comm, dns_message_t *message)
         goto badsig;
     }
 
+    // Now that we have validated the SRP message, go through and fix up all instances of
+    // *default.service.arpa to use the replacement zone, if this update is for
+    // default.services.arpa and there is a replacement zone.
+    if (replacement_zone != NULL) {
+        // All of the service instances and the host use the name from the delete, so if
+        // we update these, the names for those are taken care of.   We already found the
+        // zone for which the delete is a subdomain, so we can just replace it without
+        // finding it again.
+        for (dp = deletes; dp; dp = dp->next) {
+            replace_zone_name(&dp->name, dp->zone, replacement_zone);
+        }
+
+        // All services have PTR records, which point to names.   Both the service name and the
+        // PTR name have to be fixed up.
+        for (sp = services; sp; sp = sp->next) {
+            replace_zone_name(&sp->rr->name, sp->zone, replacement_zone);
+            uzp = dns_name_subdomain_of(sp->rr->data.ptr.name, update_zone);
+            // We already validated that the PTR record points to something in the zone, so this
+            // if condition should always be false.
+            if (uzp == NULL) {
+                ERROR("srp_relay: service PTR record zone match fail!!");
+                goto out;
+            }
+            replace_zone_name(&sp->rr->data.ptr.name, uzp, replacement_zone);
+        }
+
+        // All service instances have SRV records, which point to names.  The service instance
+        // name is already fixed up, because it's the same as the delete, but the name in the
+        // SRV record must also be fixed.
+        for (sip = service_instances; sip; sip = sip->next) {
+            uzp = dns_name_subdomain_of(sip->srv->data.srv.name, update_zone);
+            // We already validated that the SRV record points to something in the zone, so this
+            // if condition should always be false.
+            if (uzp == NULL) {
+                ERROR("srp_relay: service instance SRV record zone match fail!!");
+                goto out;
+            }
+            replace_zone_name(&sip->srv->data.srv.name, uzp, replacement_zone);
+        }
+    }
+
+    // Start the update.
+    ret = start_dns_update(comm->message, message, host_description, service_instances, services,
+                           replacement_zone == NULL ? update_zone : replacement_zone);
+    if (ret == true) {
+        INFO("Connecting to auth server.");
+        comm->message = NULL; // This is retained for the length of the dns update process.
+        return true;
+    }
+    ERROR("update start failed");
+
 badsig:
-    // True means we consumed it, not that it was valid.
+    // True means it was intended for us, and shouldn't be forwarded.
     ret = true;
 
 out:
@@ -438,6 +1255,13 @@ out:
     }
     if (host_description != NULL) {
         free(host_description);
+    }
+
+    // If we indicate that the message was an srp update, which we do by returning true, then we
+    // are expected to retain the message.   Since the update didn't validate, we need to free it
+    // here.
+    if (ret == true) {
+        dns_message_free(message);
     }
     return ret;
 }
@@ -468,19 +1292,122 @@ dns_evaluate(comm_t *comm)
     message->wire = &comm->message->wire;
     if (!srp_relay(comm, message)) {
         // The message wasn't invalid, but wasn't an SRP message.
+        dns_message_free(message);
         // dns_forward(comm)
+        // dns_forward can steal the wire message off of comm if needed.
     }
-    // But we don't save it.
-    message->wire = NULL;
-
-    //dns_message_free(message);
 }
 
 void dns_input(comm_t *comm)
 {
     dns_evaluate(comm);
-    message_free(comm->message);
-    comm->message = NULL;
+    // We're responsible for freeing the message buffer.   dns_evaluate might have
+    // already consumed it.
+    if (comm->message) {
+        message_free(comm->message);
+        comm->message = NULL;
+    }
+}
+
+static bool
+key_handler(void *context, const char *filename, char **hunks, int num_hunks, int lineno)
+{
+    tsig_key_t *key = context;
+    long val;
+    char *endptr;
+    size_t len;
+    uint8_t keybuf[SRP_SHA256_HASH_SIZE];
+    int error;
+
+    // Validate the constant-size stuff first.
+    if (strcasecmp(hunks[1], "in")) {
+        ERROR("Expecting tsig key class IN, got %s.", hunks[1]);
+        return false;
+    }
+
+    if (strcasecmp(hunks[2], "key")) {
+        ERROR("expecting tsig key type KEY, got %s", hunks[2]);
+        return false;
+    }
+
+    // There's not much meaning to be extracted from the flags.
+    val = strtol(hunks[3], &endptr, 10);
+    if (*endptr != 0 || endptr == hunks[3]) {
+        ERROR("Invalid key flags: %s", hunks[3]);
+        return false;
+    }
+    
+    // The protocol number as produced by BIND will always be 3, meaning DNSSEC, but of
+    // course we aren't using this key for DNSSEC, so it's not clear that we should take
+    // this seriously; hence we just check to see that it's a number.
+    val = strtol(hunks[4], &endptr, 10);
+    if (*endptr != 0 || endptr == hunks[4]) {
+        ERROR("Invalid protocol number: %s", hunks[4]);
+        return false;
+    }
+    
+    // The key algorithm should be HMAC-SHA253.  BIND uses 163, but this is not registered
+    // with IANA.   So again, we don't actually require this, but we do validate it so that
+    // if someone generated the wrong key type, they'll get a message.
+    val = strtol(hunks[5], &endptr, 10);
+    if (*endptr != 0 || endptr == hunks[5]) {
+        ERROR("Invalid protocol number: %s", hunks[5]);
+        return false;
+    }
+    if (val != 163) {
+        INFO("Warning: Protocol number for HMAC-SHA256 TSIG KEY is not 163, but %ld", val);
+    }
+    
+    key->name = dns_pres_name_parse(hunks[0]);
+    if (key->name == NULL) {
+        ERROR("Invalid key name: %s", hunks[0]);
+        return false;
+    }
+
+    error = srp_base64_parse(hunks[6], &len, keybuf, sizeof keybuf);
+    if (error != 0) {
+        ERROR("Invalid HMAC-SHA256 key: %s", strerror(errno));
+        goto fail;
+    }
+    
+    // The key should be 32 bytes (256 bits).
+    if (len == 0) {
+        ERROR("Invalid (null) secret for key %s", hunks[0]);
+        goto fail;
+    }
+    if (len != SRP_SHA256_HASH_SIZE) {
+        INFO("Warning: key secret length is %ld bytes instead of %d.", len, SRP_SHA256_HASH_SIZE);
+    }
+    key->secret = malloc(len);
+    if (key->secret == NULL) {
+        ERROR("Unable to allocate space for secret for key %s", hunks[0]);
+    fail:
+        dns_name_free(key->name);
+        key->name = NULL;
+        return false;
+    }
+    memcpy(key->secret, keybuf, len);
+    return true;
+}
+
+config_file_verb_t key_verbs[] = {
+    { NULL, 7, 7, key_handler }
+};
+#define NUMKEYVERBS ((sizeof key_verbs) / sizeof (config_file_verb_t))
+
+tsig_key_t *
+parse_tsig_key_file(const char *filename)
+{
+    tsig_key_t *key = calloc(1, sizeof *key);
+    if (key == NULL) {
+        ERROR("No memory for tsig key structure.");
+        return NULL;
+    }
+    if (!config_parse(key, filename, key_verbs, NUMKEYVERBS)) {
+        free(key);
+        return NULL;
+    }
+    return key;
 }
 
 int
@@ -492,32 +1419,34 @@ main(int argc, char **argv)
     udp_validator_t *NULLABLE *NONNULL up = &udp_validators;
     subnet_t *NULLABLE *NONNULL nt = &tcp_validators;
     subnet_t *NULLABLE *NONNULL sp;
-    addr_t server, pref;
+    addr_t pref;
     uint16_t port;
     socklen_t len, prefalen;
     char *s, *p;
     int width;
     uint16_t listen_port;
+    bool got_server = false;
 
     listen_port = htons(53);
 
     // Read the configuration from the command line.
     for (i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "-s")) {
-            if (i++ == argc) {
-                ERROR("-s is missing server IP address.");
+            if (got_server) {
+                ERROR("only one authoritative server can be specified.");
                 return usage(argv[0]);
             }
-            len = getipaddr(&server, argv[i]);
+            if (++i == argc) {
+                ERROR("-s is missing dns server IP address.");
+                return usage(argv[0]);
+            }
+            len = getipaddr(&dns_server, argv[i]);
             if (!len) {
                 ERROR("Invalid IP address: %s.", argv[i]);
                 return usage(argv[0]);
             }
-#ifndef NOT_HAVE_SA_LEN
-            server.sa.sa_len = len;
-#endif
-            if (i++ == argc) {
-                ERROR("-s is missing server port.");
+            if (++i == argc) {
+                ERROR("-s is missing dns server port.");
                 return usage(argv[0]);
             }
             port = strtol(argv[i], &s, 10);
@@ -525,15 +1454,26 @@ main(int argc, char **argv)
                 ERROR("Invalid port number: %s", argv[i]);
                 return usage(argv[0]);
             }
-            if (server.sa.sa_family == AF_INET) {
-                server.sin.sin_port = htons(port);
+            if (dns_server.sa.sa_family == AF_INET) {
+                dns_server.sin.sin_port = htons(port);
             } else {
-                server.sin6.sin6_port = htons(port);
+                dns_server.sin6.sin6_port = htons(port);
             }
+            got_server = true;
             i += 2;
+        } else if (!strcmp(argv[i], "-k")) {
+            if (++i == argc) {
+                ERROR("-k is missing key file name.");
+                return usage(argv[0]);
+            }
+            key = parse_tsig_key_file(argv[i]);
+            // Someething should already have printed the error message.
+            if (key == NULL) {
+                return 1;
+            }
         } else if (!strcmp(argv[i], "-t") || !strcmp(argv[i], "-u")) {
             if (!strcmp(argv[i], "-u")) {
-                if (i++ == argc) {
+                if (++i == argc) {
                     ERROR("-u is missing interface name.");
                     return usage(argv[0]);
                 }
@@ -552,7 +1492,7 @@ main(int argc, char **argv)
                 sp = nt;
             }
 
-            if (i++ == argc) {
+            if (++i == argc) {
                 ERROR("%s requires at least one prefix.", argv[i - 1]);
                 return usage(argv[0]);
             }
@@ -603,6 +1543,10 @@ main(int argc, char **argv)
             }
         }
     }
+    if (!got_server) {
+        ERROR("No authoritative DNS server specified to take updates!");
+        return 1;
+    }
 
     if (!ioloop_init()) {
         return 1;
@@ -634,6 +1578,9 @@ main(int argc, char **argv)
         return 1;
     }
     
+    // For now, hardcoded, should be configurable
+    service_update_zone = dns_pres_name_parse("home.arpa");
+
     do {
         int something = 0;
         something = ioloop_events(0);
