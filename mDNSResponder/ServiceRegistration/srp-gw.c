@@ -177,6 +177,7 @@ enum delete_type {
 void
 add_delete(dns_wire_t *msg, dns_towire_state_t *towire, delete_type_t dtype, dns_name_t *name)
 {
+    name_to_wire(towire, name);
     switch(dtype) {
     case delete_name:
         dns_u16_to_wire(towire, dns_rrtype_any);   // TYPE
@@ -193,11 +194,14 @@ add_delete(dns_wire_t *msg, dns_towire_state_t *towire, delete_type_t dtype, dns
 void
 add_rr(dns_wire_t *msg, dns_towire_state_t *towire, dns_name_t *name, dns_rr_t *rr)
 {
-    dns_u16_to_wire(towire, rr->type);   // TYPE
-    dns_u16_to_wire(towire, rr->qclass); // CLASS
-    dns_ttl_to_wire(towire, rr->ttl);    // TTL
-    rdata_to_wire(towire, rr);           // RDLEN
-    msg->nscount = htons(ntohs(msg->nscount) + 1);
+    if (rr != NULL) {
+        name_to_wire(towire, name);
+        dns_u16_to_wire(towire, rr->type);   // TYPE
+        dns_u16_to_wire(towire, rr->qclass); // CLASS
+        dns_ttl_to_wire(towire, rr->ttl);    // TTL
+        rdata_to_wire(towire, rr);           // RDLEN
+        msg->nscount = htons(ntohs(msg->nscount) + 1);
+    }
 }
 
 // Construct an update of the specified type, assuming that the record being updated
@@ -279,12 +283,10 @@ construct_update(update_t *update)
     service_t *service;
 
     // Set up the message constructor
+    memset(&towire, 0, sizeof towire);
     towire.p = &msg->data[0];  // We start storing RR data here.
-    update->update_length = 0;
     towire.lim = &msg->data[0] + update->update_max; // This is the limit to how much we can store.
     towire.message = msg;
-    towire.p_rdlength = NULL;
-    towire.p_opt = NULL;
 
     // Initialize the update message...
     memset(msg, 0, DNS_HEADER_SIZE);
@@ -303,7 +305,6 @@ construct_update(update_t *update)
         ERROR("Update construction requested when still connecting.");
         update->update_length = 0;
         return;
-        
         // Do a DNS Update for a service instance
     case refresh_existing:
         // Add a "KEY exists and is <x> and a PTR exists and is <x> prerequisite for each instance being updated.
@@ -390,6 +391,15 @@ construct_update(update_t *update)
         }
         break;
     }
+    update->update_length = towire.p - (uint8_t *)msg;
+}
+
+void
+update_finished(update_t *update, int rcode)
+{
+    // If success, construct a response
+    // If fail, send a quick status code
+    // Signal host name conflict and instance name conflict using different rcodes (?)
 }
 
 void
@@ -400,8 +410,12 @@ update_send(update_t *update)
     dns_wire_t *msg = update->update;
     struct timeval tv;
     uint8_t *p_mac;
+#ifdef DEBUG_DECODE_UPDATE
+    dns_message_t *decoded;
+#endif
     
     // Set up the message constructor
+    memset(&towire, 0, sizeof towire);
     towire.p = &msg->data[0] + update->update_length;  // We start storing RR data here.
     towire.lim = &msg->data[0] + update->update_max; // This is the limit to how much we can store.
     towire.message = msg;
@@ -453,18 +467,18 @@ update_send(update_t *update)
         update->update_length = (const uint8_t *)update->update - towire.p;
     }
     
+#ifdef DEBUG_DECODE_UPDATE
+    if (!dns_wire_parse(&decoded, msg, update->update_length)) {
+        ERROR("Constructed message does not successfully parse.");
+        update_finished(update, dns_rcode_servfail);
+        return;
+    }
+#endif
+    
     // Transmit the update
     iov[0].iov_base = update->update;
     iov[0].iov_len = update->update_length;
     update->connection->send_response(update->connection, update->message, iov, 1);
-}
-
-void
-update_finished(update_t *update, int rcode)
-{
-    // If success, construct a response
-    // If fail, send a quick status code
-    // Signal host name conflict and instance name conflict using different rcodes (?)
 }
 
 void
@@ -812,7 +826,7 @@ start_dns_update(message_t *message, dns_message_t *parsed_message, dns_host_des
         ERROR("srp_relay: unable to allocate update message buffer.");
         return false;
     }
-    update->update_length = DNS_MAX_UDP_PAYLOAD;
+    update->update_max = DNS_DATA_SIZE;
     
     // Retain the stuff we're supposed to send.
     update->host = host;
@@ -821,6 +835,7 @@ start_dns_update(message_t *message, dns_message_t *parsed_message, dns_host_des
     update->parsed_message = parsed_message;
     update->message = message;
     update->state = connect_to_server;
+    update->zone_name = update_zone;
     
     // Start the connection to the server
     update->connection = connect_to_host(&dns_server, false, update_reply_callback,
