@@ -730,8 +730,8 @@ connect_callback(io_t *context)
         srp_tls_connect_callback(connection);
     }
 
-    connection->connected(connection);
     connection->send_response = tcp_send_response;
+    connection->connected(connection);
     drop_writer(&connection->io);
     add_reader(&connection->io, tcp_read_callback, NULL);
 }
@@ -806,6 +806,7 @@ connect_to_host(addr_t *NONNULL remote_address, bool tls,
     connection->connected = connected;
     connection->disconnected = disconnected;
     connection->datagram_callback = datagram_callback;
+    connection->context = context;
     return connection;
 }
 
