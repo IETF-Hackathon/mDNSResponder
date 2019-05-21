@@ -60,6 +60,7 @@ struct dns_towire_state {
     uint8_t *NONNULL lim;
     uint8_t *NULLABLE p_rdlength;
     uint8_t *NULLABLE p_opt;
+    uint16_t line, outer_line;
     bool truncated : 1;
     unsigned int error : 31;
 };
@@ -357,48 +358,84 @@ struct dns_message {
 // towire.c:
 
 uint16_t srp_random16(void);
-void dns_name_to_wire(dns_name_pointer_t *NULLABLE r_pointer,
-                      dns_towire_state_t *NONNULL txn,
-                      const char *NONNULL name);
-void dns_full_name_to_wire(dns_name_pointer_t *NULLABLE r_pointer,
-                           dns_towire_state_t *NONNULL txn,
-                           const char *NONNULL name);
-void dns_pointer_to_wire(dns_name_pointer_t *NULLABLE r_pointer,
-                         dns_towire_state_t *NONNULL txn,
-                         dns_name_pointer_t *NONNULL pointer);
-void dns_u8_to_wire(dns_towire_state_t *NONNULL txn,
-                    uint8_t val);
-void dns_u16_to_wire(dns_towire_state_t *NONNULL txn,
-                      uint16_t val);
-void dns_u32_to_wire(dns_towire_state_t *NONNULL txn,
-                      uint32_t val);
-void dns_ttl_to_wire(dns_towire_state_t *NONNULL txn,
-                     int32_t val);
-void dns_rdlength_begin(dns_towire_state_t *NONNULL txn);
-void dns_rdlength_end(dns_towire_state_t *NONNULL txn);
-void dns_rdata_a_to_wire(dns_towire_state_t *NONNULL txn,
-                         const char *NONNULL ip_address);
-void dns_rdata_aaaa_to_wire(dns_towire_state_t *NONNULL txn,
-                            const char *NONNULL ip_address);
-uint16_t dns_rdata_key_to_wire(dns_towire_state_t *NONNULL txn,
-                               unsigned key_type,
-                               unsigned name_type,
-                               unsigned signatory,
-                               srp_key_t *NONNULL key);
-void dns_rdata_txt_to_wire(dns_towire_state_t *NONNULL txn,
-                           const char *NONNULL txt_record);
-void dns_rdata_raw_data_to_wire(dns_towire_state_t *NONNULL txn, const void *NONNULL raw_data, size_t length);
-void dns_edns0_header_to_wire(dns_towire_state_t *NONNULL txn,
-                              int mtu,
-                              int xrcode,
-                              int version,
-                              int DO);
-void dns_edns0_option_begin(dns_towire_state_t *NONNULL txn);
-void dns_edns0_option_end(dns_towire_state_t *NONNULL txn);
-void dns_sig0_signature_to_wire(dns_towire_state_t *NONNULL txn,
-                                srp_key_t *NONNULL key, uint16_t key_tag,
-                                dns_name_pointer_t *NONNULL signer,
-                                const char *NONNULL signer_fqdn);
+void dns_name_to_wire_(dns_name_pointer_t *NULLABLE r_pointer,
+                       dns_towire_state_t *NONNULL txn,
+                       const char *NONNULL name, int line);
+#define dns_name_to_wire(r_pointer, txn, name) dns_name_to_wire_(r_pointer, txn, name, __LINE__)
+
+void dns_full_name_to_wire_(dns_name_pointer_t *NULLABLE r_pointer,
+                            dns_towire_state_t *NONNULL txn,
+                            const char *NONNULL name, int line);
+#define dns_full_name_to_wire(r_pointer, txn, name) dns_full_name_to_wire_(r_pointer, txn, name, __LINE__)
+
+void dns_pointer_to_wire_(dns_name_pointer_t *NULLABLE r_pointer,
+                          dns_towire_state_t *NONNULL txn,
+                          dns_name_pointer_t *NONNULL pointer, int line);
+#define dns_pointer_to_wire(r_pointer, txn, pointer) dns_pointer_to_wire_(r_pointer, txn, pointer, __LINE__)
+
+void dns_u8_to_wire_(dns_towire_state_t *NONNULL txn,
+                     uint8_t val, int line);
+#define dns_u8_to_wire(txn, val) dns_u8_to_wire_(txn, val, __LINE__)
+
+void dns_u16_to_wire_(dns_towire_state_t *NONNULL txn,
+                      uint16_t val, int line);
+#define dns_u16_to_wire(txn, val) dns_u16_to_wire_(txn, val, __LINE__)
+
+void dns_u32_to_wire_(dns_towire_state_t *NONNULL txn,
+                      uint32_t val, int line);
+#define dns_u32_to_wire(txn, val) dns_u32_to_wire_(txn, val, __LINE__)
+
+void dns_ttl_to_wire_(dns_towire_state_t *NONNULL txn,
+                      int32_t val, int line);
+#define dns_ttl_to_wire(txn, val) dns_ttl_to_wire_(txn, val, __LINE__)
+
+void dns_rdlength_begin_(dns_towire_state_t *NONNULL txn, int line);
+#define dns_rdlength_begin(txn) dns_rdlength_begin_(txn, __LINE__)
+
+void dns_rdlength_end_(dns_towire_state_t *NONNULL txn, int line);
+#define dns_rdlength_end(txn) dns_rdlength_end_(txn, __LINE__)
+
+void dns_rdata_a_to_wire_(dns_towire_state_t *NONNULL txn,
+                          const char *NONNULL ip_address, int line);
+#define dns_rdata_a_to_wire(txn, ip_address) dns_rdata_a_to_wire_(txn, ip_address, __LINE__)
+
+void dns_rdata_aaaa_to_wire_(dns_towire_state_t *NONNULL txn,
+                             const char *NONNULL ip_address, int line);
+#define dns_rdata_aaaa_to_wire(txn, ip_address) dns_rdata_aaaa_to_wire_(txn, ip_address, __LINE__)
+
+uint16_t dns_rdata_key_to_wire_(dns_towire_state_t *NONNULL txn,
+                                unsigned key_type,
+                                unsigned name_type,
+                                unsigned signatory,
+                                srp_key_t *NONNULL key, int line);
+#define dns_rdata_key_to_wire(txn, key_type, name_type, signatory, key) \
+        dns_rdata_key_to_wire_(txn, key_type, name_type, signatory, key, __LINE__)
+
+void dns_rdata_txt_to_wire_(dns_towire_state_t *NONNULL txn,
+                            const char *NONNULL txt_record, int line);
+#define dns_rdata_txt_to_wire(txn, txt_record) dns_rdata_txt_to_wire_(txn, txt_record, __LINE__)
+
+void dns_rdata_raw_data_to_wire_(dns_towire_state_t *NONNULL txn,
+                                 const void *NONNULL raw_data, size_t length, int line);
+#define dns_rdata_raw_data_to_wire(txn, raw_data, length) dns_rdata_raw_data_to_wire_(txn, raw_data, length, __LINE__)
+
+void dns_edns0_header_to_wire_(dns_towire_state_t *NONNULL txn,
+                               int mtu, int xrcode, int version, int DO, int line);
+#define dns_edns0_header_to_wire(txn, mtu, xrcode, version, DO) dns_edns0_header_to_wire_(txn, mtu, xrcode, version, DO, __LINE__)
+
+void dns_edns0_option_begin_(dns_towire_state_t *NONNULL txn, int line);
+#define dns_edns0_option_begin(txn) dns_edns0_option_begin_(txn, __LINE__)
+
+void dns_edns0_option_end_(dns_towire_state_t *NONNULL txn, int line);
+#define dns_edns0_option_end(txn) dns_edns0_option_end_(txn, __LINE__)
+
+void dns_sig0_signature_to_wire_(dns_towire_state_t *NONNULL txn,
+                                 srp_key_t *NONNULL key, uint16_t key_tag,
+                                 dns_name_pointer_t *NONNULL signer,
+                                 const char *NONNULL signer_fqdn, int line);
+#define dns_sig0_signature_to_wire(txn, key, key_tag, signer, signer_fqdn) \
+        dns_sig0_signature_to_wire_(txn, key, key_tag, signer, signer_fqdn, __LINE__)
+
 int dns_send_to_server(dns_transaction_t *NONNULL txn,
                        const char *NONNULL anycast_address, uint16_t port,
                        dns_response_callback_t NONNULL callback);
@@ -425,9 +462,15 @@ bool dns_names_equal(dns_label_t *NONNULL name1, dns_label_t *NONNULL name2);
 
 // wireutils.c
 dns_name_t *NULLABLE dns_name_copy(dns_name_t *NONNULL original);
-void dns_u48_to_wire(dns_towire_state_t *NONNULL txn, uint64_t val);
-void dns_concatenate_name_to_wire(dns_towire_state_t *NONNULL towire,
-                                  dns_name_t *NULLABLE labels_prefix, const char *NULLABLE prefix, const char *NULLABLE suffix);
+void dns_u48_to_wire_(dns_towire_state_t *NONNULL txn, uint64_t val, int line);
+#define dns_u48_to_wire(txn, val) dns_u48_to_wire_(txn, val, __LINE__)
+
+void dns_concatenate_name_to_wire_(dns_towire_state_t *NONNULL towire,
+                                   dns_name_t *NULLABLE labels_prefix,
+                                   const char *NULLABLE prefix, const char *NULLABLE suffix, int line);
+#define dns_concatenate_name_to_wire(txn, labels_prefix, prefix, suffix) \
+        dns_concatenate_name_to_wire_(txn, labels_prefix, prefix, suffix, __LINE__)
+
 const char *NONNULL dns_name_print_to_limit(dns_name_t *NONNULL name, dns_name_t *NULLABLE limit, char *NULLABLE buf, int bufmax);
 const char *NONNULL dns_name_print(dns_name_t *NONNULL name, char *NONNULL buf, int bufmax);
 bool dns_labels_equal(const char *NONNULL label1, const char *NONNULL label2, size_t len);

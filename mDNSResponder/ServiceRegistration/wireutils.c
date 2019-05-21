@@ -71,13 +71,14 @@ dns_name_copy(dns_name_t *original)
 
 // Needed for TSIG (RFC2845).
 void
-dns_u48_to_wire(dns_towire_state_t *NONNULL txn,
-                uint64_t val)
+dns_u48_to_wire_(dns_towire_state_t *NONNULL txn,
+                 uint64_t val, int line)
 {
     if (!txn->error) {
         if (txn->p + 6 >= txn->lim) {
             txn->error = ENOBUFS;
             txn->truncated = true;
+            txn->line = line;
             return;
         }
         *txn->p++ = val >> 40;
@@ -90,7 +91,8 @@ dns_u48_to_wire(dns_towire_state_t *NONNULL txn,
 }
 
 void
-dns_concatenate_name_to_wire(dns_towire_state_t *towire, dns_name_t *labels_prefix, const char *prefix, const char *suffix)
+dns_concatenate_name_to_wire_(dns_towire_state_t *towire, dns_name_t *labels_prefix, const char *prefix,
+                              const char *suffix, int line)
 {
     dns_wire_t namebuf;
     dns_towire_state_t namewire;
@@ -125,12 +127,14 @@ dns_concatenate_name_to_wire(dns_towire_state_t *towire, dns_name_t *labels_pref
     if (namewire.error) {
         towire->truncated = namewire.truncated;
         towire->error = namewire.error;
+        towire->line = line;
     }
 
     ret = putDomainNameAsLabels((DNSMessage *)towire->message, towire->p, towire->lim, (domainname *)namebuf.data);
     if (ret == NULL) {
         towire->error = ENOBUFS;
         towire->truncated = true;
+        towire->line = line;
         return;
     }
 
@@ -138,6 +142,7 @@ dns_concatenate_name_to_wire(dns_towire_state_t *towire, dns_name_t *labels_pref
     if (ret > towire->lim) {
         towire->error = ENOBUFS;
         towire->truncated = true;
+        towire->line = line;
     } else {
         towire->p = ret;
     }
