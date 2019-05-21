@@ -340,8 +340,9 @@ dns_pres_name_parse(const char *pname)
     char buf[DNS_MAX_LABEL_SIZE];
     ret = NULL;
     
-    do {
-        dot = strchr(pname, '.');
+    s = pname;
+    dot = strchr(pname, '.');
+    while (true) {
         if (dot == NULL) {
             dot = pname + strlen(pname);
         }
@@ -376,7 +377,12 @@ dns_pres_name_parse(const char *pname)
             memcpy(next->data, buf, next->len);
         }
         next->data[next->len] = 0;
-    } while (dot[0] == '.' && len > 0);
+        if (dot[0] == '.' && len > 0) {
+            dot = dot + 1;
+        } else {
+            break;
+        }
+    }
     return ret;
     
 fail:
