@@ -69,7 +69,7 @@ srp_hmac_iov(hmac_key_t *key, uint8_t *output, size_t max, struct iovec *iov, in
         KABLOOIE;
     kablooie:
         mbedtls_strerror(status, errbuf, sizeof errbuf);
-        ERROR("srp_hmac_iov failed: %s", errbuf);
+        ERROR("srp_hmac_iov failed at hmac-mbedtls.c line %d: %s", line, errbuf);
     }
 
     if ((status = mbedtls_md_hmac_starts(&ctx, key->secret, key->length)) != 0) {
