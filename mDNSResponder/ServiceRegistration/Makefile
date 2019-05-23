@@ -28,7 +28,7 @@ clean:
 	@if test -d $(OBJDIR)   ; then rm -r $(OBJDIR)   ; fi
 	@if test -d $(BUILDDIR) ; then rm -r $(BUILDDIR) ; fi
 
-HASHOBJS     = $(OBJDIR)/hash-mbedtls.o
+HMACOBJS     = $(OBJDIR)/hmac-mbedtls.o
 SIGNOBJS     = $(OBJDIR)/sign-mbedtls.o 
 SIMPLEOBJS   = $(OBJDIR)/towire.o $(SIGNOBJS)
 DSOOBJS      = $(OBJDIR)/dso.o
@@ -44,7 +44,7 @@ $(BUILDDIR)/dnssd-proxy:  $(OBJDIR)/dnssd-proxy.o $(SIMPLEOBJS) $(DSOOBJS) $(MDN
 $(BUILDDIR)/srp-simple:	$(OBJDIR)/srp-simple.o $(SIMPLEOBJS)
 	$(CC) -o $@ $+ $(LINKOPTS)
 
-$(BUILDDIR)/srp-gw:	$(OBJDIR)/srp-gw.o $(SIMPLEOBJS) $(FROMWIREOBJS) $(IOOBJS) $(HASHOBJS) $(CFOBJS)
+$(BUILDDIR)/srp-gw:	$(OBJDIR)/srp-gw.o $(SIMPLEOBJS) $(FROMWIREOBJS) $(IOOBJS) $(HMACOBJS) $(CFOBJS)
 	$(CC) -o $@ $+ $(LINKOPTS)
 
 $(BUILDDIR)/keydump:	$(OBJDIR)/keydump.o $(SIMPLEOBJS) $(FROMWIREOBJS)
@@ -62,16 +62,19 @@ $(OBJDIR)/dnssd_ipc.o:  ../mDNSShared/dnssd_ipc.c
 $(OBJDIR)/%.o:	%.c
 	$(CC) -o $@ $(SRPCFLAGS) -c  $<
 
+-include .depfile-config-parse.c
 -include .depfile-dnssd-proxy.c
+-include .depfile-dnssd_clientstub.c
+-include .depfile-dnssd_ipc.c
+-include .depfile-dso.c
 -include .depfile-fromwire.c
--include .depfile-wireutils.c
+-include .depfile-hash-mbedtls.c
 -include .depfile-ioloop.c
 -include .depfile-keydump.c
 -include .depfile-sign-mbedtls.c
 -include .depfile-srp-gw.c
 -include .depfile-srp-simple.c
+-include .depfile-tls-mbedtls.c
 -include .depfile-towire.c
 -include .depfile-verify-mbedtls.c
--include .depfile-tls-mbedtls.c
--include .depfile-dso.c
--include .depfile-DNSCommon.c
+-include .depfile-wireutils.c
