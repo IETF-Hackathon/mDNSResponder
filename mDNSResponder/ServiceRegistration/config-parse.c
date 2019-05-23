@@ -56,7 +56,7 @@ static bool config_parse_line(void *context, const char *filename, char *line, i
 							  config_file_verb_t *verbs, int num_verbs)
 {
 	char *sp;
-#define MAXCFHUNKS 5
+#define MAXCFHUNKS 10
 	char *hunks[MAXCFHUNKS];
 	int num_hunks = 0;
 	config_file_verb_t *config_file_verb = NULL;
