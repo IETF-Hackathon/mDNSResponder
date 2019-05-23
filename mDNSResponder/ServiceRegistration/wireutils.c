@@ -81,7 +81,7 @@ dns_u48_to_wire_(dns_towire_state_t *NONNULL txn,
             txn->line = line;
             return;
         }
-        *txn->p++ = val >> 40;
+        *txn->p++ = (val >> 40) & 0xff;
         *txn->p++ = (val >> 32) & 0xff;
         *txn->p++ = (val >> 24) & 0xff;
         *txn->p++ = (val >> 16) & 0xff;
@@ -338,23 +338,23 @@ dns_name_to_wire_canonical(uint8_t *NONNULL buf, size_t max, dns_label_t *NONNUL
 dns_name_t *
 dns_pres_name_parse(const char *pname)
 {
-    const char *dot, *s;
+    const char *dot, *s, *label;
     dns_label_t *next, *ret, **prev = &ret;
     int len;
     char *t;
     char buf[DNS_MAX_LABEL_SIZE];
     ret = NULL;
     
-    s = pname;
-    dot = strchr(pname, '.');
+    label = pname;
+    dot = strchr(label, '.');
     while (true) {
         if (dot == NULL) {
-            dot = pname + strlen(pname);
+            dot = label + strlen(label);
         }
-        len = dot - pname;
+        len = dot - label;
         if (len > 0) {
             t = buf;
-            for (s = pname; s < dot; s++) {
+            for (s = label; s < dot; s++) {
                 if (*s == '\\') { // already bounds checked
                     int v0 = s[1] - '0';
                     int v1 = s[2] - '0';
@@ -377,15 +377,23 @@ dns_pres_name_parse(const char *pname)
         }
         *prev = next;
         prev = &next->next;
-        next->len = dot - pname;
+        next->len = len;
         if (next->len > 0) {
             memcpy(next->data, buf, next->len);
         }
         next->data[next->len] = 0;
         if (dot[0] == '.' && len > 0) {
             dot = dot + 1;
+        }
+        if (*dot == '\0') {
+            if (len > 0) {
+                label = dot;
+            } else {
+                break;
+            }
         } else {
-            break;
+            label = dot;
+            dot = strchr(label, '.');
         }
     }
     return ret;
