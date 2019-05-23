@@ -63,29 +63,32 @@
 
 static addr_t dns_server;
 static dns_name_t *service_update_zone; // The zone to update when we receive an update for default.service.arpa.
-static tsig_key_t *key;
+static hmac_key_t *key;
 
 static int
 usage(const char *progname)
 {
-    ERROR("usage: %s -s <addr> <port> -t <subnet> ... -u <ifname> <subnet> ...", progname);
+    ERROR("usage: %s -s <addr> <port> -k <key-file> -t <subnet> ... -u <ifname> <subnet> ...", progname);
     ERROR("  -s can only appear once.");
+    ERROR("  -k can appear once.");
     ERROR("  -t can only appear once, and is followed by one or more subnets.");
     ERROR("  -u can appear more than once, is followed by one interface name, and");
     ERROR("     one or more subnets.");
     ERROR("  <addr> is an IPv4 address or IPv6 address.");
     ERROR("  <port> is a UDP port number.");
+    ERROR("  <key-file> is a file containing an HMAC-SHA256 key for authenticating updates to the auth server.");
     ERROR("  <subnet> is an IP address followed by a slash followed by the prefix width.");
     ERROR("  <ifname> is the printable name of the interface.");
-    ERROR("ex: srp-gw -s 2001:DB8::1 53 -t 2001:DB8:1300::/48 -u en0 2001:DB8:1300:1100::/56");
+    ERROR("ex: srp-gw -s 2001:DB8::1 53 -k srp.key -t 2001:DB8:1300::/48 -u en0 2001:DB8:1300:1100::/56");
     return 1;
 }
 
+#define name_to_wire(towire, name) name_to_wire_(towire, name, __LINE__)
 void
-name_to_wire(dns_towire_state_t *towire, dns_name_t *name)
+name_to_wire_(dns_towire_state_t *towire, dns_name_t *name, int line)
 {
     // Does compression...
-    dns_concatenate_name_to_wire(towire, name, NULL, NULL);
+    dns_concatenate_name_to_wire_(towire, name, NULL, NULL, line);
 }
 
 void
@@ -274,7 +277,7 @@ add_rr(dns_wire_t *msg, dns_towire_state_t *towire, dns_name_t *name, dns_rr_t *
 // I think this is unlikely to be an actual problem, and there's no way to address it without a _lot_ of
 // complexity.
 
-void
+bool
 construct_update(update_t *update)
 {
     dns_towire_state_t towire;
@@ -304,7 +307,8 @@ construct_update(update_t *update)
     case connect_to_server:
         ERROR("Update construction requested when still connecting.");
         update->update_length = 0;
-        return;
+        return false;
+
         // Do a DNS Update for a service instance
     case refresh_existing:
         // Add a "KEY exists and is <x> and a PTR exists and is <x> prerequisite for each instance being updated.
@@ -391,7 +395,12 @@ construct_update(update_t *update)
         }
         break;
     }
+    if (towire.error != 0) {
+        ERROR("construct_update: error %s while generating update at line %d", strerror(towire.error), towire.line);
+        return false;
+    }
     update->update_length = towire.p - (uint8_t *)msg;
+    return true;
 }
 
 void
@@ -416,8 +425,8 @@ update_send(update_t *update)
     
     // Set up the message constructor
     memset(&towire, 0, sizeof towire);
-    towire.p = &msg->data[0] + update->update_length;  // We start storing RR data here.
-    towire.lim = &msg->data[0] + update->update_max; // This is the limit to how much we can store.
+    towire.p = (uint8_t *)msg + update->update_length;  // We start storing RR data here.
+    towire.lim = &msg->data[0] + update->update_max;    // This is the limit to how much we can store.
     towire.message = msg;
     towire.p_rdlength = NULL;
     towire.p_opt = NULL;
@@ -428,45 +437,55 @@ update_send(update_t *update)
         iov[0].iov_base = msg;
 
         name_to_wire(&towire, key->name);
-        dns_u16_to_wire(&towire, dns_rrtype_tsig);       // RRTYPE
-        dns_u16_to_wire(&towire, dns_qclass_any);        // CLASS
-        dns_ttl_to_wire(&towire, 0);                     // TTL
-        // The message digest skips the RDLEN field.
-        iov[0].iov_len = (uint8_t *)iov[0].iov_base - towire.p;
-        dns_rdlength_begin(&towire);                     // RDLEN
+        iov[0].iov_len = towire.p - (uint8_t *)iov[0].iov_base;
+        dns_u16_to_wire(&towire, dns_rrtype_tsig);            // RRTYPE
         iov[1].iov_base = towire.p;
-        dns_name_to_wire(NULL, &towire, "hmac-sha256."); // Algorithm Name
+        dns_u16_to_wire(&towire, dns_qclass_any);             // CLASS
+        dns_ttl_to_wire(&towire, 0);                          // TTL
+        iov[1].iov_len = towire.p - (uint8_t *)iov[1].iov_base;
+        // The message digest skips the RDLEN field.
+        dns_rdlength_begin(&towire);                          // RDLEN
+        iov[2].iov_base = towire.p;
+        dns_full_name_to_wire(NULL, &towire, "hmac-sha256."); // Algorithm Name
         gettimeofday(&tv, NULL);
-        dns_u48_to_wire(&towire, tv.tv_sec);             // Time since epoch
-        dns_u16_to_wire(&towire, 300);                   // Fudge interval (clocks can be skewed by up to 5 minutes)
-        // Message digest doesn't cover MAC size or MAC fields, for obvious reasons.
-        iov[1].iov_len = (uint8_t *)iov[1].iov_base - towire.p;
-        dns_u16_to_wire(&towire, SRP_SHA256_HASH_SIZE);  // MAC Size
-        p_mac = towire.p;                                // MAC
+        dns_u48_to_wire(&towire, tv.tv_sec);                  // Time since epoch
+        dns_u16_to_wire(&towire, 300);                        // Fudge interval (clocks can be skewed by up to 5 minutes)
+        // Message digest doesn't cover MAC size or MAC fields, for obvious reasons, nor original message ID.
+        iov[2].iov_len = towire.p - (uint8_t *)iov[2].iov_base;
+        dns_u16_to_wire(&towire, SRP_SHA256_DIGEST_SIZE);       // MAC Size
+        p_mac = towire.p;                                     // MAC
         if (!towire.error) {
-            if (towire.p + SRP_SHA256_HASH_SIZE >= towire.lim) {
+            if (towire.p + SRP_SHA256_DIGEST_SIZE >= towire.lim) {
                 towire.error = ENOBUFS;
                 towire.truncated = true;
+                towire.line = __LINE__;
             } else {
-                towire.p += SRP_SHA256_HASH_SIZE;
+                towire.p += SRP_SHA256_DIGEST_SIZE;
             }
         }
-        iov[2].iov_base = towire.p;
+        // We have to copy the message ID into the tsig signature; this is because in some cases, although not this one,
+        // the message ID will be overwritten.   So the copy of the ID is what's validated, but it's copied into the
+        // header for validation, so we don't include it when generating the hash.
+        dns_rdata_raw_data_to_wire(&towire, &msg->id, sizeof msg->id);
+        iov[3].iov_base = towire.p;
         dns_u16_to_wire(&towire, 0);                     // TSIG Error (always 0 on send).
         dns_u16_to_wire(&towire, 0);                     // Other Len (MBZ?)
-        iov[2].iov_len = (uint8_t *)iov[2].iov_base - towire.p;
+        iov[3].iov_len = towire.p - (uint8_t *)iov[3].iov_base;
         dns_rdlength_end(&towire);
         
-        // Now mix in the secret.
-        iov[3].iov_base = key->secret;
-        iov[3].iov_len = key->length;
-        
         // Okay, we have stored the TSIG signature, now compute the message digest.
-        srp_hmac_iov(SRP_HASH_TYPE_SHA256, p_mac, SRP_SHA256_HASH_SIZE, &iov[0], 4);
+        srp_hmac_iov(key, p_mac, SRP_SHA256_DIGEST_SIZE, &iov[0], 4);
         msg->arcount = htons(ntohs(msg->arcount) + 1);
-        update->update_length = (const uint8_t *)update->update - towire.p;
+        update->update_length = towire.p - (const uint8_t *)msg;
     }
     
+    if (towire.error != 0) {
+        ERROR("update_send: error \"%s\" while generating update at line %d",
+              strerror(towire.error), towire.line);
+        update_finished(update, dns_rcode_servfail);
+        return;
+    }
+
 #ifdef DEBUG_DECODE_UPDATE
     if (!dns_wire_parse(&decoded, msg, update->update_length)) {
         ERROR("Constructed message does not successfully parse.");
@@ -490,14 +509,17 @@ update_connect_callback(comm_t *comm)
     INFO("Connected to %s.", comm->name);
     // STATE CHANGE: connect_to_server -> refresh_existing
     update->state = refresh_existing;
-    construct_update(update);
+    if (!construct_update(update)) {
+        update_finished(update, dns_rcode_servfail);
+        return;
+    }
     update_send(update);
 }
 
 const char *NONNULL
-update_state_name(update_t *update)
+update_state_name(update_state_t state)
 {
-    switch(update->state) {
+    switch(state) {
     case connect_to_server:
         return "connect_to_server";
     case create_nonexistent:
@@ -578,7 +600,7 @@ update_disconnect_callback(comm_t *comm, int error)
     } else {
         // This could be bad if any updates succeeded.
         ERROR("%s disconnected during update in state %s: %s",
-              comm->name, update_state_name(update), strerror(error));
+              comm->name, update_state_name(update->state), strerror(error));
         update_finished(update, dns_rcode_servfail);
     }
 }
@@ -588,10 +610,16 @@ update_reply_callback(comm_t *comm)
 {
     update_t *update = comm->context;
     dns_wire_t *wire = &comm->message->wire;
-    char namebuf[DNS_MAX_NAME_SIZE + 1];
+    char namebuf[DNS_MAX_NAME_SIZE + 1], namebuf1[DNS_MAX_NAME_SIZE + 1];
     service_instance_t **pinstance;
+    update_state_t initial_state;
+    service_instance_t *initial_instance;
 
-    INFO("Message from %s in state %s.", comm->name, update_state_name(update));
+    initial_instance = update->instance;
+    initial_state = update->state;
+
+    INFO("Message from %s in state %s, rcode = %s.", comm->name, update_state_name(update->state), rcode_name(wire));
+
     // Sanity check the response
     if (dns_qr_get(wire) == dns_qr_query) {
         ERROR("Received a query from the authoritative server!");
@@ -611,7 +639,7 @@ update_reply_callback(comm_t *comm)
     // This isn't an error in the protocol, because we might be pipelining.   But we _aren't_ pipelining,
     // so there is only one message in flight.   So the message IDs should match.
     if (update->update->id != wire->id) {
-        ERROR("Received a response from auth server with unknown ID.");
+        ERROR("Response doesn't have the expected id: %x != %x.", wire->id, update->update->id);
         update_finished(update, dns_rcode_servfail);
     }
     
@@ -621,7 +649,7 @@ update_reply_callback(comm_t *comm)
         switch(update->state) {
         case connect_to_server:  // Can't get a response when connecting.
         invalid:
-            ERROR("Invalid rcode \"%s\" for state %s", rcode_name(wire), update_state_name(update));
+            ERROR("Invalid rcode \"%s\" for state %s", rcode_name(wire), update_state_name(update->state));
             update_finished(update, dns_rcode_servfail);
             return;
 
@@ -656,9 +684,7 @@ update_reply_callback(comm_t *comm)
                 // Not done yet, do the next one.
                 update->instance = *pinstance;
             }
-            construct_update(update);
-            update_send(update);
-            return;
+            break;
 
         case refresh_existing_instance:
             INFO("Instance refresh for %s succeeded",
@@ -675,9 +701,7 @@ update_reply_callback(comm_t *comm)
                 // STATE CHANGE: refresh_existing_instance -> create_nonexistent_instance
                 update->state = create_nonexistent_instance;
             }
-            construct_update(update);
-            update_send(update);
-            return;
+            break;
 
         case create_nonexistent_host:
             INFO("SRP Update for new host %s was successful.",
@@ -697,6 +721,7 @@ update_reply_callback(comm_t *comm)
             update_finished(update, update->fail_rcode);
             return;
         }
+        break;
 
         // We will get NXRRSET if we were adding an existing host with the prerequisite that a KEY
         // RR exist on the name with the specified value.  Some other KEY RR may exist, or there may
@@ -719,9 +744,7 @@ update_reply_callback(comm_t *comm)
             // STATE CHANGE: refresh_existing -> create_nonexistent
             update->state = create_nonexistent;
             update->instance = update->instances;
-            construct_update(update);
-            update_send(update);
-            return;
+            break;
 
         case refresh_existing_instance:
             // In this case, we tried to update an existing instance and found that the prerequisite
@@ -737,12 +760,11 @@ update_reply_callback(comm_t *comm)
             delete_added_instances:
                 update->instance = update->added_instances;
                 update->fail_rcode = dns_rcode_get(wire);
-                construct_update(update);
-                update_send(update);
+                break;
             } else {
                 update_finished(update, dns_rcode_get(wire));
+                return;
             }
-            return;
 
         case refresh_existing_host:
             // In this case, there is a conflicting host entry.  This means that all the service
@@ -757,6 +779,7 @@ update_reply_callback(comm_t *comm)
             update_finished(update, dns_rcode_get(wire));
             return;
         }
+        break;
         // We get YXDOMAIN if we specify a prerequisite that the name not exist, but it does exist.
     case dns_rcode_yxdomain: 
        switch(update->state) {
@@ -775,24 +798,20 @@ update_reply_callback(comm_t *comm)
             // STATE CHANGE: create_nonexistent -> create_nonexistent_instance
             update->state = create_nonexistent_instance;
             update->instance = update->instances;
-            construct_update(update);
-            update_send(update);
-            return;
-
+            break;
+            
         case create_nonexistent_instance:
-            // STATE CHANGE: create_nonexistent_instance -> update_existing_instance
-            update->state = create_nonexistent_instance;
-            construct_update(update);
-            update_send(update);
-            return;
+            // STATE CHANGE: create_nonexistent_instance -> refresh_existing_instance
+            update->state = refresh_existing_instance;
+            break;
             
         case create_nonexistent_host:
-            // STATE CHANGE: create_nonexistent_host -> update_existing_host
-            update->state = create_nonexistent_host;
-            construct_update(update);
-            update_send(update);
-            return;
-    }
+            // STATE CHANGE: create_nonexistent_host -> refresh_existing_host
+            update->state = refresh_existing_host;
+            break;
+       }
+       break;
+
        // We may want to return different error codes or do more informative logging for some of these:
     case dns_rcode_formerr:
     case dns_rcode_servfail:
@@ -805,7 +824,22 @@ update_reply_callback(comm_t *comm)
     default:
         goto invalid;
     }
-    // Not reached.
+
+    if (update->state != initial_state) {
+        INFO("Update state changed from %s to %s", update_state_name(initial_state), update_state_name(update->state));
+    }
+    if (update->instance != initial_instance) {
+        INFO("Update instance changed from %s to %s",
+             initial_instance == NULL ? "<null>" : dns_name_print(initial_instance->name, namebuf, sizeof namebuf),
+             update->instance == NULL ? "<null>" : dns_name_print(update->instance->name, namebuf1, sizeof namebuf1));
+    }
+    if (construct_update(update)) {
+        update_send(update);
+    } else {
+        ERROR("Failed to construct update");
+        update_finished(update, dns_rcode_servfail);
+    }
+     return;
 }
 
 bool
@@ -1327,11 +1361,11 @@ void dns_input(comm_t *comm)
 static bool
 key_handler(void *context, const char *filename, char **hunks, int num_hunks, int lineno)
 {
-    tsig_key_t *key = context;
+    hmac_key_t *key = context;
     long val;
     char *endptr;
     size_t len;
-    uint8_t keybuf[SRP_SHA256_HASH_SIZE];
+    uint8_t keybuf[SRP_SHA256_DIGEST_SIZE];
     int error;
 
     // Validate the constant-size stuff first.
@@ -1390,9 +1424,6 @@ key_handler(void *context, const char *filename, char **hunks, int num_hunks, in
         ERROR("Invalid (null) secret for key %s", hunks[0]);
         goto fail;
     }
-    if (len != SRP_SHA256_HASH_SIZE) {
-        INFO("Warning: key secret length is %ld bytes instead of %d.", len, SRP_SHA256_HASH_SIZE);
-    }
     key->secret = malloc(len);
     if (key->secret == NULL) {
         ERROR("Unable to allocate space for secret for key %s", hunks[0]);
@@ -1402,6 +1433,8 @@ key_handler(void *context, const char *filename, char **hunks, int num_hunks, in
         return false;
     }
     memcpy(key->secret, keybuf, len);
+    key->length = len;
+    key->algorithm = SRP_HMAC_TYPE_SHA256;
     return true;
 }
 
@@ -1410,15 +1443,16 @@ config_file_verb_t key_verbs[] = {
 };
 #define NUMKEYVERBS ((sizeof key_verbs) / sizeof (config_file_verb_t))
 
-tsig_key_t *
-parse_tsig_key_file(const char *filename)
+hmac_key_t *
+parse_hmac_key_file(const char *filename)
 {
-    tsig_key_t *key = calloc(1, sizeof *key);
+    hmac_key_t *key = calloc(1, sizeof *key);
     if (key == NULL) {
         ERROR("No memory for tsig key structure.");
         return NULL;
     }
     if (!config_parse(key, filename, key_verbs, NUMKEYVERBS)) {
+        ERROR("Failed to parse key file.");
         free(key);
         return NULL;
     }
@@ -1475,13 +1509,12 @@ main(int argc, char **argv)
                 dns_server.sin6.sin6_port = htons(port);
             }
             got_server = true;
-            i += 2;
         } else if (!strcmp(argv[i], "-k")) {
             if (++i == argc) {
                 ERROR("-k is missing key file name.");
                 return usage(argv[0]);
             }
-            key = parse_tsig_key_file(argv[i]);
+            key = parse_hmac_key_file(argv[i]);
             // Someething should already have printed the error message.
             if (key == NULL) {
                 return 1;
