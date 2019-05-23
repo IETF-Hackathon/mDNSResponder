@@ -24,8 +24,9 @@
 #define __SRP_CRYPTO_H
 // Anonymous key structure, depends on the target.
 typedef struct srp_key srp_key_t;
-typedef struct tsig_key tsig_key_t;
-struct tsig_key {
+typedef struct hmac_key hmac_key_t;
+struct hmac_key {
+    int algorithm;
     dns_name_t *NONNULL name;
     uint8_t *NONNULL secret;
     int length;
@@ -34,6 +35,7 @@ struct tsig_key {
 #ifdef SRP_CRYPTO_MBEDTLS_INTERNAL
 #include <mbedtls/error.h>
 #include <mbedtls/pk.h>
+#include <mbedtls/md.h>
 #include <mbedtls/ecp.h>
 #include <mbedtls/ecdsa.h>
 #include <mbedtls/entropy.h>
@@ -51,6 +53,7 @@ struct srp_key {
     mbedtls_ctr_drbg_context ctr;
 };    
 
+#define DEBUG_SHA256
 #ifdef DEBUG_SHA256
 int srp_mbedtls_sha256_update_ret(mbedtls_sha256_context *NONNULL sha, uint8_t *NONNULL message, size_t msglen);
 int srp_mbedtls_sha256_finish_ret(mbedtls_sha256_context *NONNULL sha, uint8_t *NONNULL hash);
@@ -71,8 +74,9 @@ int srp_mbedtls_sha256_finish_ret(mbedtls_sha256_context *NONNULL sha, uint8_t *
 
 #define dnssec_keytype_ecdsa  13
 
-#define SRP_SHA256_HASH_SIZE        ECDSA_SHA256_HASH_SIZE
-#define SRP_HASH_TYPE_SHA256        1
+#define SRP_SHA256_DIGEST_SIZE      32
+#define SRP_SHA256_BLOCK_SIZE       64
+#define SRP_HMAC_TYPE_SHA256        1
 
 // sign_*.c:
 void srp_keypair_free(srp_key_t *NONNULL key);
@@ -85,14 +89,14 @@ size_t srp_pubkey_length(srp_key_t *NONNULL key);
 size_t srp_signature_length(srp_key_t *NONNULL key);
 int srp_pubkey_copy(uint8_t *NONNULL buf, size_t max, srp_key_t *NONNULL key);
 int srp_sign(uint8_t *NONNULL output, size_t max,
-	     uint8_t *NONNULL message, size_t msglen, uint8_t *NONNULL rdata, size_t rdlen, srp_key_t *NONNULL key);
+             uint8_t *NONNULL message, size_t msglen, uint8_t *NONNULL rdata, size_t rdlen, srp_key_t *NONNULL key);
 
 // verify_*.c:
 bool srp_sig0_verify(dns_wire_t *NONNULL message, dns_rr_t *NONNULL key, dns_rr_t *NONNULL signature);
 void srp_print_key(srp_key_t *NONNULL key);
 
 // hash_*.c:
-void srp_hmac_iov(int hash_type, uint8_t *NONNULL output, size_t max, struct iovec *NONNULL iov, int count);
+void srp_hmac_iov(hmac_key_t *NONNULL key, uint8_t *NONNULL output, size_t max, struct iovec *NONNULL iov, int count);
 int srp_base64_parse(char *NONNULL src, size_t *NONNULL len_ret, uint8_t *NONNULL buf, size_t buflen);
 #endif // __SRP_CRYPTO_H
 
