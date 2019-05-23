@@ -145,6 +145,7 @@ srp_random16()
             ERROR("mbedtls_ctr_drbg_seed failed: %s", errbuf);
             return 0xffff;
         }
+        rng_inited = true;
     }
     status = mbedtls_ctr_drbg_random(&rng_context, (unsigned char *)&ret, sizeof ret);
     if (status != 0) {
