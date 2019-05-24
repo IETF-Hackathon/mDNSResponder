@@ -184,7 +184,7 @@ add_delete(dns_wire_t *msg, dns_towire_state_t *towire, delete_type_t dtype, dns
     switch(dtype) {
     case delete_name:
         dns_u16_to_wire(towire, dns_rrtype_any);   // TYPE
-        dns_u16_to_wire(towire, dns_qclass_none);  // CLASS
+        dns_u16_to_wire(towire, dns_qclass_any);   // CLASS
         dns_ttl_to_wire(towire, 0);                // TTL
         dns_u16_to_wire(towire, 0);                // RDLEN
         break;
@@ -406,9 +406,18 @@ construct_update(update_t *update)
 void
 update_finished(update_t *update, int rcode)
 {
+    INFO("Update Finished, rcode = %s", dns_rcode_name(rcode));
     // If success, construct a response
     // If fail, send a quick status code
     // Signal host name conflict and instance name conflict using different rcodes (?)
+    // Okay, so if there's a host name/instance name conflict, and the host name has the right key, then
+    // the instance name is actually bogus and should be overwritten.
+    // If the host has the wrong key, and the instance is present, then the instance is also bogus.
+    // So in each of these cases, perhaps we should just gc the instance.
+    // This would mean that there is nothing to signal: either the instance is a mismatch, and we
+    // overwrite it and return success, or the host is a mismatch and we gc the instance and return failure.
+    ioloop_close(&update->connection->io);
+    // update_free(update);
 }
 
 void
@@ -540,55 +549,6 @@ update_state_name(update_state_t state)
     return "unknown state";
 }
 
-const char *
-rcode_name(dns_wire_t *wire)
-{
-    switch(dns_rcode_get(wire)) {
-    case dns_rcode_noerror:
-        return "No Error";
-    case dns_rcode_formerr:
-        return "Format Error";
-    case dns_rcode_servfail:
-        return "Server Failure";
-    case dns_rcode_nxdomain:
-        return "Non-Existent Domain";
-    case dns_rcode_notimp:
-        return "Not Implemented";
-    case dns_rcode_refused:
-        return "Query Refused";
-    case dns_rcode_yxdomain:
-        return "RFC6672] Name Exists when it should not";
-    case dns_rcode_yxrrset:
-        return "RR Set Exists when it should not";
-    case dns_rcode_nxrrset:
-        return "RR Set that should exist does not";
-    case dns_rcode_notauth:
-        return "Not Authorized";
-    case dns_rcode_notzone:
-        return "Name not contained in zone";
-    case dns_rcode_dsotypeni:
-        return "DSO-Type Not Implemented";
-    case dns_rcode_badvers:
-        return "TSIG Signature Failure";
-    case dns_rcode_badkey:
-        return "Key not recognized";
-    case dns_rcode_badtime:
-        return "Signature out of time window";
-    case dns_rcode_badmode:
-        return "Bad TKEY Mode";
-    case dns_rcode_badname:
-        return "Duplicate key name";
-    case dns_rcode_badalg:
-        return "Algorithm not supported";
-    case dns_rcode_badtrunc:
-        return "Bad Truncation";
-    case dns_rcode_badcookie:
-        return "Bad/missing Server Cookie";
-    default:
-        return "Unknown rcode.";
-    }        
-}
-
 void
 update_disconnect_callback(comm_t *comm, int error)
 {
@@ -618,7 +578,8 @@ update_reply_callback(comm_t *comm)
     initial_instance = update->instance;
     initial_state = update->state;
 
-    INFO("Message from %s in state %s, rcode = %s.", comm->name, update_state_name(update->state), rcode_name(wire));
+    INFO("Message from %s in state %s, rcode = %s.", comm->name,
+         update_state_name(update->state), dns_rcode_name(dns_rcode_get(wire)));
 
     // Sanity check the response
     if (dns_qr_get(wire) == dns_qr_query) {
@@ -649,7 +610,8 @@ update_reply_callback(comm_t *comm)
         switch(update->state) {
         case connect_to_server:  // Can't get a response when connecting.
         invalid:
-            ERROR("Invalid rcode \"%s\" for state %s", rcode_name(wire), update_state_name(update->state));
+            ERROR("Invalid rcode \"%s\" for state %s",
+                  dns_rcode_name(dns_rcode_get(wire)), update_state_name(update->state));
             update_finished(update, dns_rcode_servfail);
             return;
 
