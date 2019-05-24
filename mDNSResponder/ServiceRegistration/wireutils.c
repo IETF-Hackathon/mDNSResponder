@@ -433,6 +433,55 @@ dns_name_subdomain_of(dns_name_t *name, dns_name_t *domain)
     return NULL;
 }
 
+const char *
+dns_rcode_name(int rcode)
+{
+    switch(rcode) {
+    case dns_rcode_noerror:
+        return "No Error";
+    case dns_rcode_formerr:
+        return "Format Error";
+    case dns_rcode_servfail:
+        return "Server Failure";
+    case dns_rcode_nxdomain:
+        return "Non-Existent Domain";
+    case dns_rcode_notimp:
+        return "Not Implemented";
+    case dns_rcode_refused:
+        return "Query Refused";
+    case dns_rcode_yxdomain:
+        return "RFC6672] Name Exists when it should not";
+    case dns_rcode_yxrrset:
+        return "RR Set Exists when it should not";
+    case dns_rcode_nxrrset:
+        return "RR Set that should exist does not";
+    case dns_rcode_notauth:
+        return "Not Authorized";
+    case dns_rcode_notzone:
+        return "Name not contained in zone";
+    case dns_rcode_dsotypeni:
+        return "DSO-Type Not Implemented";
+    case dns_rcode_badvers:
+        return "TSIG Signature Failure";
+    case dns_rcode_badkey:
+        return "Key not recognized";
+    case dns_rcode_badtime:
+        return "Signature out of time window";
+    case dns_rcode_badmode:
+        return "Bad TKEY Mode";
+    case dns_rcode_badname:
+        return "Duplicate key name";
+    case dns_rcode_badalg:
+        return "Algorithm not supported";
+    case dns_rcode_badtrunc:
+        return "Bad Truncation";
+    case dns_rcode_badcookie:
+        return "Bad/missing Server Cookie";
+    default:
+        return "Unknown rcode.";
+    }        
+}
+
 // Local Variables:
 // mode: C
 // tab-width: 4

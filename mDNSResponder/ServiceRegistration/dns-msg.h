@@ -479,6 +479,7 @@ size_t dns_name_wire_length(dns_label_t *NONNULL name);
 size_t dns_name_to_wire_canonical(uint8_t *NONNULL buf, size_t max, dns_label_t *NONNULL name);
 dns_name_t *NULLABLE dns_pres_name_parse(const char *NONNULL pname);
 dns_name_t *NULLABLE dns_name_subdomain_of(dns_name_t *NONNULL name, dns_name_t *NONNULL domain);
+const char *NONNULL dns_rcode_name(int rcode);
 
 #endif // _DNS_MSG_H
 
