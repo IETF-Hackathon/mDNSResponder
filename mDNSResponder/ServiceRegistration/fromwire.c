@@ -558,6 +558,7 @@ dns_wire_parse(dns_message_t *NONNULL *NULLABLE ret, dns_wire_t *message, unsign
         dns_message_free(rv);                                                       \
         return false;                                                               \
     }                                                                               \
+    fprintf(stderr, "Section %s, %d records\n", name, rv->count);                   \
                                                                                     \
     if (rv->qdcount != 0) {                                                         \
         rv->sets = calloc(sizeof *rv->sets, rv->count);                             \
