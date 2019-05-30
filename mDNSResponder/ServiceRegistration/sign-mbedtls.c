@@ -1,6 +1,6 @@
 /* sign.c
  *
- * Copyright (c) 2018 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2018-2019 Apple Computer, Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -156,6 +156,30 @@ srp_random16()
     return ret;
 }
 
+srp_key_t *
+srp_load_key_from_buffer(const uint8_t *buffer, size_t length)
+{
+    srp_key_t *key;
+    int status;
+    char errbuf[64];
+
+    key = srp_key_setup();
+    if (key == NULL) {
+        return NULL;
+    }
+
+    if ((status = mbedtls_pk_parse_key(&key->key, buffer, length, NULL, 0)) != 0) {
+        mbedtls_strerror(status, errbuf, sizeof errbuf);
+        ERROR("mbedtls_pk_parse_key failed: %s", errbuf);
+    } else if (!mbedtls_pk_can_do(&key->key, MBEDTLS_PK_ECDSA)) {
+        ERROR("Buffer does not contain a usable ECDSA key.");
+    } else {
+        return key;
+    }
+    srp_keypair_free(key);
+    return NULL;
+}
+
 // Function to read a keypair from a file
 srp_key_t *
 srp_load_keypair(const char *file)
@@ -163,9 +187,6 @@ srp_load_keypair(const char *file)
     int fd = open(file, O_RDONLY);
     unsigned char buf[256];
     ssize_t rv;
-    srp_key_t *key;
-    int status;
-    char errbuf[64];
 
     if (fd < 0) {
         if (errno != ENOENT) {
@@ -182,22 +203,10 @@ srp_load_keypair(const char *file)
         ERROR("key file is unreasonably large.");
         return NULL;
     }
-
-    key = srp_key_setup();
-    if (key == NULL) {
-        return NULL;
+    if (rv < 0) {
+        ERROR("Unable to read srp key: %s", strerror(errno));
     }
-
-    if ((status = mbedtls_pk_parse_key(&key->key, buf, rv, NULL, 0)) != 0) {
-        mbedtls_strerror(status, errbuf, sizeof errbuf);
-        ERROR("mbedtls_pk_parse_key failed: %s", errbuf);
-    } else if (!mbedtls_pk_can_do(&key->key, MBEDTLS_PK_ECDSA)) {
-        ERROR("%s does not contain a usable ECDSA key.", file);
-    } else {
-        return key;
-    }
-    srp_keypair_free(key);
-    return NULL;
+    return srp_load_key_from_buffer(buf, (size_t)rv);
 }
 
 // Function to generate a key
@@ -227,6 +236,25 @@ srp_generate_key(void)
     return NULL;
 }
 
+// Copy an srp_key_t into a buffer.   Key is not necessarily aligned with the beginning of the
+// buffer; the return value, if not NULL, is the beginning of the key.   If NULL, the buffer wasn't
+// big enough.
+uint8_t *
+srp_store_key_to_buffer(uint8_t *buffer, size_t *length, srp_key_t *key)
+{
+    size_t len = mbedtls_pk_write_key_der(&key->key, buffer, *length);
+    uint8_t *ret;
+    char errbuf[64];
+    if (len <= 0) {
+        mbedtls_strerror(len, errbuf, sizeof errbuf);
+        ERROR("mbedtls_pk_write_key_der failed: %s", errbuf);
+        return NULL;
+    }
+    ret = &buffer[*length - len];
+    *length = len;
+    return ret;
+}
+
 // Function to write a keypair to a file
 int
 srp_write_key_to_file(const char *file, srp_key_t *key)
@@ -234,16 +262,12 @@ srp_write_key_to_file(const char *file, srp_key_t *key)
     int fd;
     unsigned char buf[256];
     ssize_t rv;
-    int len;
-    char errbuf[64];
+    size_t len;
+    uint8_t *ret;
 
-    len = mbedtls_pk_write_key_der(&key->key, buf, sizeof buf);
-    if (len <= 0) {
-        mbedtls_strerror(len, errbuf, sizeof errbuf);
-        ERROR("mbedtls_pk_write_key_der failed: %s", errbuf);
+    if ((ret = srp_store_key_to_buffer(buf, &len, key)) == NULL) {
         return 0;
     }
-
 #ifndef O_DIRECT
 #define O_DIRECT 0
 #endif
@@ -253,7 +277,7 @@ srp_write_key_to_file(const char *file, srp_key_t *key)
         return 0;
     }        
 
-    rv = write(fd, &buf[sizeof buf - len], len);
+    rv = write(fd, ret, len);
     close(fd);
     if (rv != len) {
         ERROR("key file write truncated.");
