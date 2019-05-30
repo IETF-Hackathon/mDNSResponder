@@ -83,6 +83,52 @@ usage(const char *progname)
     return 1;
 }
 
+// Free the data structures into which the SRP update was parsed.   The pointers to the various DNS objects that these
+// structures point to are owned by the parsed DNS message, and so these do not need to be freed here.
+void
+update_free_parts(service_instance_t *service_instances, service_instance_t *added_instances,
+                  service_t *services, dns_host_description_t *host_description)
+{
+    service_instance_t *sip;
+    service_t *sp;
+
+    for (sip = service_instances; sip; ) {
+        service_instance_t *next = sip->next;
+        free(sip);
+        sip = next;
+    }
+    for (sip = added_instances; sip; ) {
+        service_instance_t *next = sip->next;
+        free(sip);
+        sip = next;
+    }
+    for (sp = services; sp; ) {
+        service_t *next = sp->next;
+        free(sp);
+        sp = next;
+    }
+    if (host_description != NULL) {
+        free(host_description);
+    }
+}
+
+// Free all the stuff that we accumulated while processing the SRP update.
+void
+update_free(update_t *update)
+{
+    // Free all of the structures we collated RRs into:
+    update_free_parts(update->instances, update->added_instances, update->services, update->host);
+    // We don't need to free the zone name: it's either borrowed from the message,
+    // or it's service_update_zone, which is static.
+    message_free(update->message);
+    dns_message_free(update->parsed_message);
+    if (update->message) {
+        free(update->message);
+    }
+    free(update);
+}
+
+
 #define name_to_wire(towire, name) name_to_wire_(towire, name, __LINE__)
 void
 name_to_wire_(dns_towire_state_t *towire, dns_name_t *name, int line)
@@ -406,7 +452,22 @@ construct_update(update_t *update)
 void
 update_finished(update_t *update, int rcode)
 {
+    comm_t *comm = update->client;
+    struct iovec iov;
+    dns_wire_t response;
     INFO("Update Finished, rcode = %s", dns_rcode_name(rcode));
+    
+    memset(&response, 0, DNS_HEADER_SIZE);
+    response.id = update->message->wire.id;
+    response.bitfield = update->message->wire.bitfield;
+    dns_rcode_set(&response, rcode);
+    
+    iov.iov_base = &response;
+    iov.iov_len = DNS_HEADER_SIZE;
+
+    comm->send_response(comm, comm->message, &iov, 1);
+
+
     // If success, construct a response
     // If fail, send a quick status code
     // Signal host name conflict and instance name conflict using different rcodes (?)
@@ -416,8 +477,8 @@ update_finished(update_t *update, int rcode)
     // So in each of these cases, perhaps we should just gc the instance.
     // This would mean that there is nothing to signal: either the instance is a mismatch, and we
     // overwrite it and return success, or the host is a mismatch and we gc the instance and return failure.
-    ioloop_close(&update->connection->io);
-    // update_free(update);
+    ioloop_close(&comm->io);
+    update_free(update);
 }
 
 void
@@ -506,7 +567,7 @@ update_send(update_t *update)
     // Transmit the update
     iov[0].iov_base = update->update;
     iov[0].iov_len = update->update_length;
-    update->connection->send_response(update->connection, update->message, iov, 1);
+    update->server->send_response(update->server, update->message, iov, 1);
 }
 
 void
@@ -805,7 +866,7 @@ update_reply_callback(comm_t *comm)
 }
 
 bool
-start_dns_update(message_t *message, dns_message_t *parsed_message, dns_host_description_t *host,
+start_dns_update(comm_t *connection, dns_message_t *parsed_message, dns_host_description_t *host,
                  service_instance_t *instance, service_t *service, dns_name_t *update_zone)
 {
     update_t *update;
@@ -829,14 +890,15 @@ start_dns_update(message_t *message, dns_message_t *parsed_message, dns_host_des
     update->instances = instance;
     update->services = service;
     update->parsed_message = parsed_message;
-    update->message = message;
+    update->message = connection->message;
     update->state = connect_to_server;
     update->zone_name = update_zone;
+    update->client = connection;
     
     // Start the connection to the server
-    update->connection = connect_to_host(&dns_server, false, update_reply_callback,
-                                         update_connect_callback, update_disconnect_callback, update);
-    if (update->connection == NULL) {
+    update->server = connect_to_host(&dns_server, false, update_reply_callback,
+                                     update_connect_callback, update_disconnect_callback, update);
+    if (update->server == NULL) {
         free(update);
         return false;
     }
@@ -1234,12 +1296,13 @@ srp_relay(comm_t *comm, dns_message_t *message)
     }
 
     // Start the update.
-    ret = start_dns_update(comm->message, message, host_description, service_instances, services,
+    ret = start_dns_update(comm, message, host_description, service_instances, services,
                            replacement_zone == NULL ? update_zone : replacement_zone);
     if (ret == true) {
         INFO("Connecting to auth server.");
         comm->message = NULL; // This is retained for the length of the dns update process.
-        return true;
+        ret = true;
+        goto success;
     }
     ERROR("update start failed");
 
@@ -1249,30 +1312,21 @@ badsig:
 
 out:
     // free everything we allocated but (it turns out) aren't going to use
-    for (dp = deletes; dp; ) {
-        delete_t *next = dp->next;
-        free(dp);
-        dp = next;
-    }
-    for (sip = service_instances; sip; ) {
-        service_instance_t *next = sip->next;
-        free(sip);
-        sip = next;
-    }
-    for (sp = services; sp; ) {
-        service_t *next = sp->next;
-        free(sp);
-        sp = next;
-    }
-    if (host_description != NULL) {
-        free(host_description);
-    }
+    update_free_parts(service_instances, NULL, services, host_description);
 
     // If we indicate that the message was an srp update, which we do by returning true, then we
     // are expected to retain the message.   Since the update didn't validate, we need to free it
     // here.
     if (ret == true) {
         dns_message_free(message);
+    }
+success:
+    // No matter how we get out of this, we free the delete structures, because they are not
+    // used to do the update.
+    for (dp = deletes; dp; ) {
+        delete_t *next = dp->next;
+        free(dp);
+        dp = next;
     }
     return ret;
 }

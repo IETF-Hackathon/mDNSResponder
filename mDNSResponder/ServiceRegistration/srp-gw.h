@@ -90,7 +90,8 @@ enum update_event {
 
 typedef struct update update_t;
 struct update {
-    comm_t *NONNULL connection;
+    comm_t *NONNULL server;                       // Connection to authoritative server
+    comm_t *NONNULL client;                       // Connection to SRP client (which might just be a UDP socket).
     update_state_t state;
     dns_host_description_t *NONNULL host;
     service_instance_t *NONNULL instances;
