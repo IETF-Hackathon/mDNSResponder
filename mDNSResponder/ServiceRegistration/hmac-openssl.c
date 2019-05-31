@@ -23,8 +23,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <fcntl.h>
-#include <sys/random.h>
-#include <sys/errno.h>
+#include <errno.h>
 
 #include "srp.h"
 #include "dns-msg.h"

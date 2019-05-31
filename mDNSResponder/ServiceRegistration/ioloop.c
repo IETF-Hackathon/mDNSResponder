@@ -25,7 +25,7 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <sys/uio.h>
-#include <sys/errno.h>
+#include <errno.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
@@ -34,7 +34,7 @@
 #endif
 #include <fcntl.h>
 #include <sys/time.h>
-#include <sys/signal.h>
+#include <signal.h>
 
 #include "srp.h"
 #include "dns-msg.h"

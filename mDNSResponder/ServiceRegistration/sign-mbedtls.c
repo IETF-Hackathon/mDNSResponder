@@ -26,8 +26,14 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <fcntl.h>
+#ifdef LINUX_GETENTROPY
+#define _GNU_SOURCE
+#include <linux/random.h>
+#include <sys/syscall.h>
+#else
 #include <sys/random.h>
-#include <sys/errno.h>
+#endif
+#include <errno.h>
 
 #include "srp.h"
 #include "dns-msg.h"
@@ -80,7 +86,11 @@ srp_keypair_free(srp_key_t *key)
 static int
 get_entropy(void *data, unsigned char *output, size_t len, size_t *outlen)
 {
+#ifdef LINUX_GETENTROPY
+    int result = syscall(SYS_getrandom, output, len, GRND_RANDOM);
+#else
     int result = getentropy(output, len);
+#endif
     (void)data;
 
     if (result != 0) {

@@ -1,6 +1,6 @@
-/* wire.c
+/* towire.c
  *
- * Copyright (c) 2018 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2018-2019 Apple Computer, Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,9 +14,9 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
- * DNS wire-format functions.
+ * DNS to-wire wire-format functions.
  *
- * These are really simple functions for constructing DNS messages wire format.
+ * These are really simple functions for constructing DNS messages in wire format.
  * The flow is that there is a transaction structure which contains pointers to both
  * a message output buffer and a response input buffer.   The structure is initialized,
  * and then the various wire format functions are called repeatedly to store data.
@@ -28,7 +28,7 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <string.h>
-#include <sys/errno.h>
+#include <errno.h>
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include "srp.h"
@@ -129,7 +129,7 @@ dns_name_to_wire_(dns_name_pointer_t *NULLABLE r_pointer,
 
     if (!txn->error) {
         memset(&np, 0, sizeof np);
-        np.message_start = (u_int8_t *)txn->message;
+        np.message_start = (uint8_t *)txn->message;
         np.name_start = txn->p;
 
         cur = name;
@@ -205,7 +205,7 @@ dns_pointer_to_wire_(dns_name_pointer_t *NULLABLE r_pointer,
                      dns_name_pointer_t *NONNULL pointer, int line)
 {
     if (!txn->error) {
-        u_int16_t offset = pointer->name_start - pointer->message_start;
+        uint16_t offset = pointer->name_start - pointer->message_start;
         if (offset > DNS_MAX_POINTER) {
             txn->error = ETOOMANYREFS;
             txn->line = line;
@@ -424,7 +424,7 @@ dns_rdata_txt_to_wire_(dns_towire_state_t *NONNULL txn,
             txn->line = line;
             return;
         }
-        *txn->p++ = (u_int8_t)len;
+        *txn->p++ = (uint8_t)len;
         memcpy(txn->p, txt_record, len);
         txn->p += len;
     }
@@ -626,7 +626,7 @@ dns_send_to_server(dns_transaction_t *NONNULL txn,
         }
 #endif
 
-        datasize = txn->towire.p - ((u_int8_t *)txn->towire.message);
+        datasize = txn->towire.p - ((uint8_t *)txn->towire.message);
         rv = sendto(txn->sock, txn->towire.message, datasize, 0, &addr.sa, len);
         if (rv < 0) {
             txn->towire.error = errno;
