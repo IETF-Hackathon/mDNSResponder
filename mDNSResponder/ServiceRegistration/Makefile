@@ -1,22 +1,41 @@
 BUILDDIR = build
 OBJDIR = objects
 
-SYSTEM := $(shell uname -s)
-ifeq ($(SYSTEM), Darwin)
-  os=x
-else ifeq ($(SYSTEM), Linux)
-  os=linux
+ifndef os
+  SYSTEM := $(shell uname -s)
+  ifeq ($(SYSTEM), Darwin)
+    os=x
+  else ifeq ($(SYSTEM), Linux)
+    os=linux
+  endif
 endif
+
+ifdef INSTBASE
+  INSTALL_PREFIX=$(INSTBASE)
+else
+  INSTALL_PREFIX=$(DESTDIR)/usr
+endif
+
+CP?=/bin/cp
 
 ifeq ($(os),x)
 SRPCFLAGS = -O0 -g -Wall -Werror -DSTANDALONE -I../mDNSCore -I/usr/local/include -I. -I../mDNSShared -I../DSO -MMD -MF .depfile-${notdir $<} -DUSE_SELECT
-LINKOPTS = -lmbedcrypto -lmbedtls -lmbedx509
+SRPLDOPTS = -lmbedcrypto -lmbedtls -lmbedx509
 else ifeq ($(os), linux)
 SRPCFLAGS = -O0 -g -Wall -Werror -DSTANDALONE -I../mDNSCore -I/usr/local/include -I. -I../mDNSShared -I../DSO -MMD -MF .depfile-${notdir $<} -DNOT_HAVE_SA_LEN -DUSE_SELECT
-LINKOPTS = -lmbedcrypto -lmbedtls -lmbedx509
+SRPLDOPTS = -lmbedcrypto -lmbedtls -lmbedx509
+else ifeq ($(os), linux-uclibc)
+SRPCFLAGS = -O0 -g -Wall -Werror -DSTANDALONE -I../mDNSCore -I/usr/local/include -I. -I../mDNSShared -I../DSO -MMD -MF .depfile-${notdir $<} -DNOT_HAVE_SA_LEN -DUSE_SELECT -DLINUX_GETENTROPY
+SRPLDOPTS = -lmbedcrypto -lmbedtls -lmbedx509
 endif
 
 all:	setup $(BUILDDIR)/srp-simple $(BUILDDIR)/srp-gw $(BUILDDIR)/keydump $(BUILDDIR)/dnssd-proxy
+
+install: all
+	$(CP) $(BUILDDIR)/srp-simple $(INSTALL_PREFIX)/sbin
+	$(CP) $(BUILDDIR)/srp-gw $(INSTALL_PREFIX)/sbin
+	$(CP) $(BUILDDIR)/dnssd-proxy $(INSTALL_PREFIX)/sbin
+	$(CP) $(BUILDDIR)/keydump $(INSTALL_PREFIX)/bin
 
 # 'setup' sets up the build directory structure the way we want
 setup:
@@ -39,28 +58,28 @@ IOOBJS       = $(OBJDIR)/ioloop.o $(OBJDIR)/tls-mbedtls.o
 CFOBJS       = $(OBJDIR)/config-parse.o
 
 $(BUILDDIR)/dnssd-proxy:  $(OBJDIR)/dnssd-proxy.o $(SIMPLEOBJS) $(DSOOBJS) $(MDNSOBJS) $(FROMWIREOBJS) $(IOOBJS) $(CFOBJS)
-	$(CC) -o $@ $+ $(LINKOPTS)
+	$(CC) -o $@ $+ $(SRPLDOPTS)
 
 $(BUILDDIR)/srp-simple:	$(OBJDIR)/srp-simple.o $(SIMPLEOBJS)
-	$(CC) -o $@ $+ $(LINKOPTS)
+	$(CC) -o $@ $+ $(SRPLDOPTS)
 
 $(BUILDDIR)/srp-gw:	$(OBJDIR)/srp-gw.o $(SIMPLEOBJS) $(FROMWIREOBJS) $(IOOBJS) $(HMACOBJS) $(CFOBJS)
-	$(CC) -o $@ $+ $(LINKOPTS)
+	$(CC) -o $@ $+ $(SRPLDOPTS)
 
 $(BUILDDIR)/keydump:	$(OBJDIR)/keydump.o $(SIMPLEOBJS) $(FROMWIREOBJS)
-	$(CC) -o $@ $+ $(LINKOPTS)
+	$(CC) -o $@ $+ $(SRPLDOPTS)
 
 $(OBJDIR)/dso.o:	../DSO/dso.c
-	$(CC) -o $@ $(SRPCFLAGS) -c -I. -I../mDNSShared $<
+	$(CC) -o $@ $(SRPCFLAGS) $(CFLAGS) -c -I. -I../mDNSShared $<
 
 $(OBJDIR)/dnssd_clientstub.o:  ../mDNSShared/dnssd_clientstub.c
-	$(CC) -o $@ $(SRPCFLAGS) -c -I. -I../mDNSShared $<
+	$(CC) -o $@ $(SRPCFLAGS) $(CFLAGS) -c -I. -I../mDNSShared $<
 
 $(OBJDIR)/dnssd_ipc.o:  ../mDNSShared/dnssd_ipc.c
-	$(CC) -o $@ $(SRPCFLAGS) -c -I. -I../mDNSShared $<
+	$(CC) -o $@ $(SRPCFLAGS) $(CFLAGS) -c -I. -I../mDNSShared $<
 
 $(OBJDIR)/%.o:	%.c
-	$(CC) -o $@ $(SRPCFLAGS) -c  $<
+	$(CC) -o $@ $(SRPCFLAGS) $(CFLAGS) -c  $<
 
 -include .depfile-config-parse.c
 -include .depfile-dnssd-proxy.c
