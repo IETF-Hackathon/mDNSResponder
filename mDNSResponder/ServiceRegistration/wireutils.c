@@ -1,4 +1,4 @@
-/* fromwire.c
+/* wireutils.c
  *
  * Copyright (c) 2019 Apple Computer, Inc. All rights reserved.
  *
@@ -53,7 +53,7 @@ dns_name_copy(dns_name_t *original)
     dns_name_t *next;
 
     for (next = original; next; next = next->next) {
-        *cur = calloc(1, 1 + next->len + (sizeof *cur) - DNS_MAX_LABEL_SIZE);
+        *cur = calloc(1, 1 + next->len + (sizeof (dns_name_t)) - DNS_MAX_LABEL_SIZE);
         if (*cur == NULL) {
             if (ret != NULL) {
                 dns_name_free(ret);

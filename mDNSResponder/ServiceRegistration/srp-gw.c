@@ -122,9 +122,6 @@ update_free(update_t *update)
     // or it's service_update_zone, which is static.
     message_free(update->message);
     dns_message_free(update->parsed_message);
-    if (update->message) {
-        free(update->message);
-    }
     free(update);
 }
 
@@ -465,8 +462,7 @@ update_finished(update_t *update, int rcode)
     iov.iov_base = &response;
     iov.iov_len = DNS_HEADER_SIZE;
 
-    comm->send_response(comm, comm->message, &iov, 1);
-
+    comm->send_response(comm, update->message, &iov, 1);
 
     // If success, construct a response
     // If fail, send a quick status code
@@ -477,7 +473,7 @@ update_finished(update_t *update, int rcode)
     // So in each of these cases, perhaps we should just gc the instance.
     // This would mean that there is nothing to signal: either the instance is a mismatch, and we
     // overwrite it and return success, or the host is a mismatch and we gc the instance and return failure.
-    ioloop_close(&comm->io);
+    ioloop_close(&update->server->io);
     update_free(update);
 }
 
@@ -835,13 +831,17 @@ update_reply_callback(comm_t *comm)
        }
        break;
 
-       // We may want to return different error codes or do more informative logging for some of these:
+    case dns_rcode_notauth:
+        ERROR("DNS Authoritative server does not think we are authorized to update it, please fix.");
+        update_finished(update, dns_rcode_servfail);
+        return;
+        
+        // We may want to return different error codes or do more informative logging for some of these:
     case dns_rcode_formerr:
     case dns_rcode_servfail:
     case dns_rcode_notimp:
     case dns_rcode_refused:
     case dns_rcode_yxrrset:
-    case dns_rcode_notauth:
     case dns_rcode_notzone:
     case dns_rcode_dsotypeni:
     default:
@@ -964,7 +964,7 @@ srp_relay(comm_t *comm, dns_message_t *message)
     }
 
     update_zone = message->questions[0].name;
-    if (service_update_zone != NULL && dns_names_equal_text(update_zone, "default.service.arpa")) {
+    if (service_update_zone != NULL && dns_names_equal_text(update_zone, "default.service.arpa.")) {
         replacement_zone = service_update_zone;
     } else {
         replacement_zone = NULL;
