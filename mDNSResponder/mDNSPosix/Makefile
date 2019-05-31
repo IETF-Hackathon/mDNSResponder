@@ -74,7 +74,7 @@ LN = ln -s -f
 CFLAGS_COMMON = -I$(COREDIR) -I$(SHAREDDIR) -I$(DSODIR) -I$(PROXYDIR) -I$(OBJDIR) -fwrapv -W -Wall -DPID_FILE=\"/var/run/mdnsd.pid\" -DMDNS_UDS_SERVERPATH=\"/var/run/mdnsd\" -DDSO_HAS_TLS -DPOSIX_HAS_TLS -DDNS_PUSH_ENABLED
 CFLAGS_PTHREAD =
 OS_LINKOPTS = $(OS_LINKOPTS)
-OS_OS_LINKOPTS_PTHREAD = -lpthread
+OS_LINKOPTS_PTHREAD = -lpthread
 LDSUFFIX = so
 JAVACFLAGS_OS = -fPIC -shared -ldns_sd
 
@@ -149,7 +149,7 @@ CFLAGS_OS = -DHAVE_IPV6
 #     -pthread
 #       Link a user-threaded process against libc_r instead of libc.
 CFLAGS_PTHREAD   = -pthread -D_THREAD_SAFE
-OS_OS_LINKOPTS_PTHREAD = -pthread
+OS_LINKOPTS_PTHREAD = -pthread
 JAVACFLAGS_OS += -I$(JDK)/include/freebsd
 LDCONFIG = ldconfig
 else
