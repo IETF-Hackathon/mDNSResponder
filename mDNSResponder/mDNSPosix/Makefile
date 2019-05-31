@@ -73,8 +73,8 @@ RM = rm
 LN = ln -s -f
 CFLAGS_COMMON = -I$(COREDIR) -I$(SHAREDDIR) -I$(DSODIR) -I$(PROXYDIR) -I$(OBJDIR) -fwrapv -W -Wall -DPID_FILE=\"/var/run/mdnsd.pid\" -DMDNS_UDS_SERVERPATH=\"/var/run/mdnsd\" -DDSO_HAS_TLS -DPOSIX_HAS_TLS -DDNS_PUSH_ENABLED
 CFLAGS_PTHREAD =
-LINKOPTS =
-LINKOPTS_PTHREAD = -lpthread
+OS_LINKOPTS = $(OS_LINKOPTS)
+OS_OS_LINKOPTS_PTHREAD = -lpthread
 LDSUFFIX = so
 JAVACFLAGS_OS = -fPIC -shared -ldns_sd
 
@@ -109,7 +109,7 @@ CFLAGS_OS = -DNOT_HAVE_DAEMON -DNOT_HAVE_SA_LEN -DNOT_HAVE_SOCKLEN_T -DNOT_HAVE_
 CC = gcc
 LD = gcc
 SOOPTS = -shared
-LINKOPTS = -lsocket -lnsl -lresolv
+OS_LINKOPTS = -lsocket -lnsl -lresolv
 JAVACFLAGS_OS += -I$(JDK)/include/solaris
 ifneq ($(DEBUG),1)
 STRIP = $(ST)
@@ -123,7 +123,7 @@ LD = $(CC)
 SOOPTS = -shared
 FLEXFLAGS_OS = -l
 JAVACFLAGS_OS += -I$(JDK)/include/linux
-LINKOPTS=-lmbedcrypto -lmbedtls -lmbedx509
+OS_LINKOPTS=-lmbedcrypto -lmbedtls -lmbedx509
 
 # uClibc does not support Name Service Switch
 ifneq ($(os),linux-uclibc)
@@ -149,7 +149,7 @@ CFLAGS_OS = -DHAVE_IPV6
 #     -pthread
 #       Link a user-threaded process against libc_r instead of libc.
 CFLAGS_PTHREAD   = -pthread -D_THREAD_SAFE
-LINKOPTS_PTHREAD = -pthread
+OS_OS_LINKOPTS_PTHREAD = -pthread
 JAVACFLAGS_OS += -I$(JDK)/include/freebsd
 LDCONFIG = ldconfig
 else
@@ -169,7 +169,7 @@ CFLAGS_OS = -DHAVE_IPV6 -no-cpp-precomp -Werror -Wdeclaration-after-statement \
 CC = gcc
 LD = $(CC)
 SOOPTS = -dynamiclib
-LINKOPTS = -lSystem -lmbedcrypto -lmbedtls -lmbedx509
+OS_LINKOPTS = -lSystem -lmbedcrypto -lmbedtls -lmbedx509
 LDSUFFIX = dylib
 JDK = /System/Library/Frameworks/JavaVM.framework/Home
 JAVACFLAGS_OS = -dynamiclib -I/System/Library/Frameworks/JavaVM.framework/Headers -framework JavaVM
@@ -234,6 +234,7 @@ endif
 endif
 
 MDNSCFLAGS = $(CFLAGS) $(CFLAGS_COMMON) $(CFLAGS_OS) $(CFLAGS_DEBUGGING)
+MDNSLINKOPTS = $(LINKOPTS) $(LDFLAGS) $(OS_LINKOPTS)
 
 #############################################################################
 
@@ -270,7 +271,7 @@ Daemon: setup $(BUILDDIR)/mdnsd
 	@echo "Responder daemon done"
 
 $(BUILDDIR)/mdnsd: $(DAEMONOBJS)
-	$(CC) -o $@ $+ $(LINKOPTS)
+	$(CC) -o $@ $+ $(MDNSLINKOPTS)
 	$(STRIP) $@
 
 # libdns_sd target builds the client library
@@ -280,7 +281,7 @@ libdns_sd: setup $(BUILDDIR)/libdns_sd.$(LDSUFFIX)
 CLIENTLIBOBJS = $(OBJDIR)/dnssd_clientlib.c.so.o $(OBJDIR)/dnssd_clientstub.c.so.o $(OBJDIR)/dnssd_ipc.c.so.o
 
 $(BUILDDIR)/libdns_sd.$(LDSUFFIX): $(CLIENTLIBOBJS)
-	$(LD) $(SOOPTS) $(LINKOPTS) -o $@ $+
+	$(LD) $(SOOPTS) $(MDNSLINKOPTS) -o $@ $+
 	$(STRIP) $@
 
 Clients: setup libdns_sd ../Clients/build/dns-sd
@@ -294,7 +295,7 @@ nss_mdns: setup $(BUILDDIR)/$(NSSLIBFILE)
 	@echo "Name Service Switch module done"
 
 $(BUILDDIR)/$(NSSLIBFILE): $(CLIENTLIBOBJS) $(OBJDIR)/nss_mdns.c.so.o
-	$(LD) $(SOOPTS) $(LINKOPTS) -o $@ $+
+	$(LD) $(SOOPTS) $(MDNSLINKOPTS) -o $@ $+
 	$(STRIP) $@
 
 #############################################################################
@@ -491,26 +492,26 @@ dnsextd: setup $(BUILDDIR)/dnsextd
 	@echo "dnsextd done"
 
 $(BUILDDIR)/mDNSClientPosix:         $(APPOBJ)     $(OBJDIR)/Client.c.o
-	$(CC) $+ -o $@ $(LINKOPTS)
+	$(CC) $+ -o $@ $(MDNSLINKOPTS)
 
 $(BUILDDIR)/mDNSResponderPosix:      $(COMMONOBJ)  $(OBJDIR)/Responder.c.o
-	$(CC) $+ -o $@ $(LINKOPTS)
+	$(CC) $+ -o $@ $(MDNSLINKOPTS)
 
 $(BUILDDIR)/mDNSProxyResponderPosix: $(COMMONOBJ)  $(OBJDIR)/ProxyResponder.c.o
-	$(CC) $+ -o $@ $(LINKOPTS)
+	$(CC) $+ -o $@ $(MDNSLINKOPTS)
 
 $(BUILDDIR)/mDNSIdentify:            $(SPECIALOBJ) $(OBJDIR)/Identify.c.o
-	$(CC) $+ -o $@ $(LINKOPTS)
+	$(CC) $+ -o $@ $(MDNSLINKOPTS)
 
 $(OBJDIR)/Identify.c.o:              $(COREDIR)/mDNS.c # Note: Identify.c textually imports mDNS.c
 
 $(BUILDDIR)/mDNSNetMonitor:          $(SPECIALOBJ) $(OBJDIR)/NetMonitor.c.o
-	$(CC) $+ -o $@ $(LINKOPTS)
+	$(CC) $+ -o $@ $(MDNSLINKOPTS)
 
 $(OBJDIR)/NetMonitor.c.o:            $(COREDIR)/mDNS.c # Note: NetMonitor.c textually imports mDNS.c
 
 $(BUILDDIR)/dnsextd:                 $(DNSEXTDOBJ) $(OBJDIR)/dnsextd.c.threadsafe.o
-	$(CC) $+ -o $@ $(LINKOPTS) $(LINKOPTS_PTHREAD)
+	$(CC) $+ -o $@ $(MDNSLINKOPTS) $(OS_LINKOPTS_PTHREAD)
 
 #############################################################################
 
