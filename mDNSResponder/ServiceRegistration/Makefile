@@ -22,10 +22,10 @@ ifeq ($(os),x)
 SRPCFLAGS = -O0 -g -Wall -Werror -DSTANDALONE -I../mDNSCore -I/usr/local/include -I. -I../mDNSShared -I../DSO -MMD -MF .depfile-${notdir $<} -DUSE_SELECT
 SRPLDOPTS = -lmbedcrypto -lmbedtls -lmbedx509
 else ifeq ($(os), linux)
-SRPCFLAGS = -O0 -g -Wall -Werror -DSTANDALONE -I../mDNSCore -I/usr/local/include -I. -I../mDNSShared -I../DSO -MMD -MF .depfile-${notdir $<} -DNOT_HAVE_SA_LEN -DUSE_SELECT
+SRPCFLAGS = -DMDNS_UDS_SERVERPATH=\"/var/run/mdnsd\" -O0 -g -Wall -Werror -DSTANDALONE -I../mDNSCore -I/usr/local/include -I. -I../mDNSShared -I../DSO -MMD -MF .depfile-${notdir $<} -DNOT_HAVE_SA_LEN -DUSE_SELECT
 SRPLDOPTS = -lmbedcrypto -lmbedtls -lmbedx509
 else ifeq ($(os), linux-uclibc)
-SRPCFLAGS = -O0 -g -Wall -Werror -DSTANDALONE -I../mDNSCore -I/usr/local/include -I. -I../mDNSShared -I../DSO -MMD -MF .depfile-${notdir $<} -DNOT_HAVE_SA_LEN -DUSE_SELECT -DLINUX_GETENTROPY
+SRPCFLAGS = -DMDNS_UDS_SERVERPATH=\"/var/run/mdnsd\" -O0 -g -Wall -Werror -DSTANDALONE -I../mDNSCore -I/usr/local/include -I. -I../mDNSShared -I../DSO -MMD -MF .depfile-${notdir $<} -DNOT_HAVE_SA_LEN -DUSE_SELECT -DLINUX_GETENTROPY
 SRPLDOPTS = -lmbedcrypto -lmbedtls -lmbedx509
 endif
 
