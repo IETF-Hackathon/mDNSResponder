@@ -469,7 +469,7 @@ dnssd_hardwired_setup(void)
                 dnssd_hardwired_add(ifc, "ns", ifc->domain_ld, towire.p - wire.data, wire.data, dns_rrtype_a);
             }
 
-            if (my_ipv4_addr != NULL) {
+            if (my_ipv6_addr != NULL) {
                 // AAAA
                 RESET;
                 dns_rdata_aaaa_to_wire(&towire, my_ipv6_addr);
@@ -1382,7 +1382,7 @@ static bool config_string_handler(char **ret, const char *filename, const char *
     int len = strlen(string);
 
     // Space for NUL and leading dot.
-    if (len > 0 && string[len - 1] != '.') {
+    if (tdot && len > 0 && string[len - 1] != '.') {
         add_trailing_dot = 1;
     }
     s = malloc(strlen(string) + add_leading_dot + add_trailing_dot + 1);

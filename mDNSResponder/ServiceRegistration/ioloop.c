@@ -658,10 +658,10 @@ setup_listener_socket(int family, int protocol, bool tls, uint16_t port, const c
 
     if (family == AF_INET) {
         sl = sizeof listener->address.sin;
-        listener->address.sin.sin_port = port ? port : htons(53);
+        listener->address.sin.sin_port = port ? htons(port) : htons(53);
     } else {
         sl = sizeof listener->address.sin6;
-        listener->address.sin6.sin6_port = port ? port : htons(53);
+        listener->address.sin6.sin6_port = port ? htons(port) : htons(53);
     }
     listener->address.sa.sa_family = family;
 #ifndef NOT_HAVE_SA_LEN
