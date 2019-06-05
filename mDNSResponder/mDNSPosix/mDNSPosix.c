@@ -1690,7 +1690,7 @@ mDNSexport mStatus mDNSPlatformInit(mDNS *const m)
         }
     }
 
-#if 0
+#if POSIX_HAS_TLS
     // Use the SRP TLS shim.
     mDNSPosixTLSInit();
 #endif
