@@ -4,10 +4,10 @@ Depends: libc, libc, libmbedtls, mDNSResponder
 License: Apache-2.0
 Section: net
 Architecture: mips_24kc
-Installed-Size: 36999
+Installed-Size: 37002
 Filename: dnssd-proxy_5_mips_24kc.ipk
-Size: 37898
-SHA256sum: 1da1c88da38f7e64cb06c412be1b41bf84b718cdb3d176f31fb7a9569f475121
+Size: 37887
+SHA256sum: b6d0536bf097a6e65124bcc75ac0fabe5fbec8c5966726fcc8901fd50b13e448
 Description:  DNSSD-Proxy is a reference implementation of the IETF DNS Service Discovery Proxy.
  The Discovery Proxy proxies multicast DNS service from one network to another using
  the DNS protocol.   This allows devices on one link to discover services on another
@@ -19,11 +19,10 @@ Depends: libc, libc, libmbedtls
 License: Apache-2.0
 Section: net
 Architecture: mips_24kc
-Installed-Size: 193834
+Installed-Size: 193827
 Filename: mDNSResponder_5_mips_24kc.ipk
-Size: 194671
-SHA256sum: 7563a67a76a0f3ae53cea2b2af1ce144662a1bbdd5d60b34c5a713c15bddb7b3
-Description:  DNSSD-Proxy is a reference implementation of the IETF DNS Service Discovery Proxy.
- The Discovery Proxy proxies multicast DNS service from one network to another using
- the DNS protocol.   This allows devices on one link to discover services on another
- link.
+Size: 194646
+SHA256sum: 227aebd72f74b97d8ae933d6e266536c1af14cd4ab1b4e8aa1c683351dc4a4c0
+Description:  mDNSResponder is the Apple implementation of a DNSSD service discovery agent.   It
+ can be used to discover services both on the local link using the Multicast DNS
+ protocol, and on both local and non-local links using the DNS protocol.
