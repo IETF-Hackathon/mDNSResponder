@@ -1,0 +1,33 @@
+Package: dnssd-proxy
+Version: 5
+Depends: libc, libc, libmbedtls, mDNSResponder
+Source: package/network/services/dnssd-proxy
+License: Apache-2.0
+Section: net
+Maintainer: Ted Lemon <mellon@fugue.com>
+Architecture: mips_24kc
+Installed-Size: 36999
+Filename: dnssd-proxy_5_mips_24kc.ipk
+Size: 37898
+SHA256sum: 1da1c88da38f7e64cb06c412be1b41bf84b718cdb3d176f31fb7a9569f475121
+Description:  DNSSD-Proxy is a reference implementation of the IETF DNS Service Discovery Proxy.
+ The Discovery Proxy proxies multicast DNS service from one network to another using
+ the DNS protocol.   This allows devices on one link to discover services on another
+ link.
+
+Package: mDNSResponder
+Version: 5
+Depends: libc, libc, libmbedtls
+Source: package/network/services/mDNSResponder
+License: Apache-2.0
+Section: net
+Maintainer: Ted Lemon <mellon@fugue.com>
+Architecture: mips_24kc
+Installed-Size: 193834
+Filename: mDNSResponder_5_mips_24kc.ipk
+Size: 194671
+SHA256sum: 7563a67a76a0f3ae53cea2b2af1ce144662a1bbdd5d60b34c5a713c15bddb7b3
+Description:  DNSSD-Proxy is a reference implementation of the IETF DNS Service Discovery Proxy.
+ The Discovery Proxy proxies multicast DNS service from one network to another using
+ the DNS protocol.   This allows devices on one link to discover services on another
+ link.
