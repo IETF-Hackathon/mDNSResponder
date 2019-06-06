@@ -409,6 +409,7 @@ dnssd_hardwired_setup(void)
     for (ifc = interfaces; ifc; ifc = ifc->next) {
         // Browsing pointers...
         RESET;
+        dns_full_name_to_wire(NULL, &towire, ifc->domain);
         dnssd_hardwired_add(ifc, "b._dns-sd._udp", ifc->domain_ld, towire.p - wire.data, wire.data, dns_rrtype_ptr);
         dnssd_hardwired_add(ifc, "lb._dns-sd._udp", ifc->domain_ld, towire.p - wire.data, wire.data, dns_rrtype_ptr);
 
@@ -418,6 +419,7 @@ dnssd_hardwired_setup(void)
         // _dns-update._udp
         // _dns-update-tls._udp
         // We deny the presence of support for LLQ, because we only support DNS Push
+        RESET;
         dnssd_hardwired_add(ifc, "_dns-llq._udp", ifc->domain_ld, towire.p - wire.data, wire.data, dns_rrtype_srv);
         dnssd_hardwired_add(ifc, "_dns-llq-tls._tcp", ifc->domain_ld, towire.p - wire.data, wire.data, dns_rrtype_srv);
         
