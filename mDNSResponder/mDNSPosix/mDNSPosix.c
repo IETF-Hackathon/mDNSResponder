@@ -151,7 +151,6 @@ mDNSexport mStatus mDNSPlatformSendUDP(const mDNS *const m, const void *const ms
     PosixNetworkInterface * thisIntf = (PosixNetworkInterface *)(InterfaceID);
     int sendingsocket = -1;
 
-    (void)src;  // Will need to use this parameter once we implement mDNSPlatformUDPSocket/mDNSPlatformUDPClose
     (void) useBackgroundTrafficClass;
 
     assert(m != NULL);
@@ -189,6 +188,16 @@ mDNSexport mStatus mDNSPlatformSendUDP(const mDNS *const m, const void *const ms
         sin6->sin6_addr           = *(struct in6_addr*)&dst->ip.v6;
         sendingsocket             = thisIntf ? thisIntf->multicastSocket6 : m->p->unicastSocket6;
     }
+#endif
+
+#ifdef POSIX_PORT_RANDOMIZATION
+    // We don't open the socket until we get a send, because we don't know whether it's IPv4 or IPv6.
+    if (sock && sock->events.fd == -1) {
+        // Open the socket
+        // Randomize the port.
+    }        
+#else
+    (void)src;
 #endif
 
     if (sendingsocket >= 0)
@@ -710,13 +719,34 @@ mDNSexport long mDNSPlatformWriteTCP(TCPSocket *sock, const char *msg, unsigned 
 
 mDNSexport UDPSocket *mDNSPlatformUDPSocket(mDNSIPPort port)
 {
-    (void)port;         // Unused
-    return NULL;
+#ifdef POSIX_PORT_RANDOMIZATION
+    mStatus err;
+    mDNSBool randomizePort = mDNSIPPortIsZero(requestedport);
+    UDPSocket *p = callocL("UDPSocket", sizeof(UDPSocket));
+    if (!p) { LogMsg("mDNSPlatformUDPSocket: memory exhausted"); return(mDNSNULL); }
+    p->randomizePort = randomizePort;
+    p->port = requestedport;
+    p->events.fd = -1;
+    return(p);
+#else
+    static UDPSocket dummy;
+    (void)port;
+    return &dummy;
+#endif // POSIX_PORT_RANDOMIZATION
 }
 
-mDNSexport void           mDNSPlatformUDPClose(UDPSocket *sock)
+mDNSexport void mDNSPlatformUDPClose(UDPSocket *sock)
 {
-    (void)sock;         // Unused
+#ifdef POSIX_PORT_RANDOMIZATION
+    if (sock && sock->events.fd != -1)
+    {
+        stopReadOrWriteEvents(sock->events.fd, mDNSfalse, mDNStrue,
+                              PosixEventFlag_Read | PosixEventFlag_Write);
+        close(sock->events.fd);
+        free(sock);
+    }
+#endif // POSIX_PORT_RANDOMIZATION
+    (void)sock;
 }
 
 mDNSexport void mDNSPlatformUpdateProxyList(const mDNSInterfaceID InterfaceID)

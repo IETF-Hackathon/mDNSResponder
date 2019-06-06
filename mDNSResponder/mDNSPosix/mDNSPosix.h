@@ -78,6 +78,16 @@ struct PosixEventSource
 };
 typedef struct PosixEventSource PosixEventSource;
     
+struct UDPSocket_struct
+{
+    PosixEventSource events;
+    mDNSAddr remoteAddress;
+    mDNSIPPort remotePort;
+    mDNSBool setup;
+    mDNSBool randomizePort;
+    mDNSIPPort port;
+};
+
 struct TCPSocket_struct
 {
     TCPSocketFlags flags;       // MUST BE FIRST FIELD -- mDNSCore expects every TCPSocket_struct to begin with TCPSocketFlags flags
