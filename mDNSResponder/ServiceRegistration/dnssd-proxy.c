@@ -1500,6 +1500,10 @@ main(int argc, char **argv)
         return 1;
     }
 
+    if (!srp_tls_server_init()) {
+        return 1;
+    }
+
     if (!ioloop_init()) {
         return 1;
     }
