@@ -98,10 +98,10 @@ At this point you can use DNS to discover services on the LAN interface of the O
 
 DNS-Based Service Discovery, is based, naturally enough, on DNS domain names.
 
-Each physical (or virtual) link
+For each physical (or virtual) link
 on your network for which you wish to enable remote discovery of services
-is assigned a DNS domain name,
-much like how individual hosts are assigned domain names.
+you need to chose a DNS domain name,
+much like how you choose and assign domain names to individual hosts.
 In this context the term “link” means an IP multicast domain —
 a group of devices that can all communicate with each other using IP multicast,
 which is used by [Multicast DNS](https://tools.ietf.org/html/rfc6762).
@@ -110,7 +110,7 @@ On each of the links
 on your network for which you wish to enable remote discovery of services
 you install a Discovery Proxy, to perform discovery operations on behalf of remote clients.
 The Discovery Proxy should be assigned a static IP address,
-and assigned a DNS hostname,
+with an associated DNS hostname,
 so that clients can reliably connect to it.
 
 For an initial trial you’ll probably want to start with a single Discovery Proxy
@@ -140,12 +140,12 @@ To generate the key and self-signed certificate, use the commands below.
 ''Replace hostname.example.com with the actual hostname of the Discovery Proxy device.''
 
 On a linux or MacOS install, you will run the gen_key and cert_write commands from your
-home directory (or the directory where you checked out mbedtls):
+home directory (or the directory where you checked out mbedtls).
 
-    mkdir /etc/dnssd-proxy
-    cd /etc/dnssd-proxy
     $HOME/mbedtls/programs/pkey/gen_key type=rsa rsa_keysize=4096 filename=server.key
     $HOME/mbedtls/programs/x509/cert_write selfsign=1 issuer_key=server.key issuer_name=CN=hostname.example.com not_before=20190226000000 not_after=20211231235959 is_ca=1 max_pathlen=0 output_file=server.crt
+    sudo mkdir /etc/dnssd-proxy
+    sudo mv server.key server.crt /etc/dnssd-proxy
 
 On OpenWrt, the utilities are installed, so invoke them as follows, again changing hostname.example.com to the correct hostname:
 
@@ -176,11 +176,17 @@ Create this file with text as illustrated below:
 	interface en0 my-building.example.org.
 	my-name my-hostname.example.org.
 	my-ipv4-addr 203.0.113.123
+	udp-port 53
+	tcp-port 53
 
 Replace “en0” with the name of the interface on which you want the Discovery Proxy to discover services.
 
+To see the list of available interfaces, use the “ifconfig” command.
+On a modern Mac there are many.
+As a general rule, look for one of the “en” interfaces, where the flags say “UP,BROADCAST,…”
+
 Replace “my-building.example.org.” with your delegated subdomain name,
-or “services.home.arpa” if you have no delegated subdomain name.
+or “service.home.arpa” if you have no delegated subdomain name.
 
 Replace “my-hostname.example.org” with the DNS hostname of your Discovery Proxy device.
 
@@ -188,6 +194,9 @@ Replace “203.0.113.123” with the actual IP address of your Discovery Proxy d
 
 Once you have the key, the certificate, and the configuration file in place,
 run the dnssd-proxy executable in a Terminal window.
+
+You should see some lines beginning “hardwired_add”,
+followed by “waiting” when the dnssd-proxy is ready to start processing requests.
 
 ## Configuring Clients with Your Chosen DNS Subdomain Name for Wide-Area Discovery
 
@@ -210,23 +219,47 @@ No manual client configuration is required.
 
 	lb._dns-sd._udp.example.org. PTR my-building.example.org.
 
-If you don’t have the ability at this time to add this PTR record to your
-organization’s DNS server, then for evaluation you can manually add
-“my-building.example.org” as a DNS search domain on your client devices.
+There are other ways that automatic configuration can be performed, described in
+[Section 11 of RFC 6763](https://tools.ietf.org/html/rfc6763#section-11).
+
+### Manually adding a DNS search domain on the client, for testing
+
+If you don’t have the ability at this time to add a PTR record to your
+organization’s existing DNS server, then for evaluation you can manually add
+“my-building.example.org” (or “service.home.arpa”, or whatever name you chose)
+as a DNS search domain on your client devices.
+
+To manually add a DNS search domain on macOS, go to System Preferences, Network.
+Select the currently active network interface and click “Advanced…”
+Select “DNS” and click “+” under “Search Domains” to add a new search domain.
+
+To manually add a DNS search domain on iOS, go to Settings, Wi-Fi.
+Tap on the “i” button, Configure DNS, Manual, and then tap “Add Search Domain”.
+
+### Manually adding a DNS resolver address on the client, for testing
 
 If “my-building.example.org” is properly delegated to your Discovery Proxy,
 then this is all that is required for client devices to remotely discover
 services on the “my-building.example.org” link.
 
 If “my-building.example.org” is not yet delegated to your Discovery Proxy,
-or you’re using a temporary name like “services.home.arpa”,
+or you’re using a temporary name like “service.home.arpa”,
 then you’ll need to manually configure your client devices to use
 the IP address of your Discovery Proxy as their DNS resolver.
 This will cause them to send all of their DNS requests to your Discovery Proxy.
 The Discovery Proxy will answer all the DNS requests it is responsible for
 (i.e., service discovery requests for “my-building.example.org”,
-“services.home.arpa”, or similar)
+“service.home.arpa”, or similar)
 and forward all others to its own default DNS resolver.
+
+To manually add a DNS resolver on macOS, go to System Preferences, Network.
+Select the currently active network interface and click “Advanced…”
+Select “DNS” and click “+” under “DNS Servers” to add a new search domain.
+
+To manually add a DNS resolver on iOS, go to Settings, Wi-Fi.
+Tap on the “i” button, Configure DNS, Manual.
+Under “DNS SERVERS” delete the servers listed there,
+and manually add the IP address of your Discovery Proxy.
 
 ## Testing
 
