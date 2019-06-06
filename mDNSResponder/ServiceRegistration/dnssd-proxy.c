@@ -1521,7 +1521,7 @@ main(int argc, char **argv)
         return 1;
     }
 
-    if (!srp_tls_server_init(NULL, tls_key_filename, tls_cert_filename)) {
+    if (!srp_tls_server_init(NULL, tls_cert_filename, tls_key_filename)) {
         return 1;
     }
 
