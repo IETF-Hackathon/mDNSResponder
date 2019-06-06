@@ -102,15 +102,15 @@ Then enter the admin password that you configured when you set up the router.
 You can also install an ssh key on the router using
 [the router’s web user interface](http://192.168.8.1/cgi-bin/luci/admin/system/admin).
 
-When you are at a command prompt on the router, install the libustream-mbedtls package,
-which is needed to do https downloads:
+When you are at a command prompt on the router, install the libustream-mbedtls and mbedtls-util packages,
+to enable secure https package downloads:
 
 	opkg update
 	opkg install libustream-mbedtls mbedtls-util
 	
-Now add this line to the end of /etc/opkg/customfeeds.conf, using the “vi” editor or similar:
+Now add a line to the end of /etc/opkg/customfeeds.conf to add our OpenWrt package, as shown below:
 
-    src/gz dnssd https://raw.githubusercontent.com/IETF-Hackathon/mDNSResponder/release/OpenWrt/packages/mips_24kc/base
+    echo 'src/gz dnssd https://raw.githubusercontent.com/IETF-Hackathon/mDNSResponder/release/OpenWrt/packages/mips_24kc/base' >> /etc/opkg/customfeeds.conf
 
 To fetch the new feed, once again:
 
@@ -120,22 +120,13 @@ Now remove the dnsmasq package, since we’re installing a new DNS server:
 
     opkg remove dnsmasq
 
-Now install the ISC DHCP server, which is needed to provide DHCP service now that dnsmasq is no longer present:
+Now install the ISC DHCP server,
+which is needed to provide DHCP service now that dnsmasq is no longer present,
+the mbedtls-write package, and dnssd-proxy package, which also installs the mDNSResponder package:
 
-    opkg install isc-dhcp-server-ipv4
+    opkg install isc-dhcp-server-ipv4 mbedtls-write dnssd-proxy
 
-You will also need to install the mbedtls-write package, which adds an mbedtls utility required to sign the
-self-signed cert that dnssd-proxy uses for the TLS connection:
-
-    opkg install mbedtls-write
-
-And finally, install the dnssd-proxy package, which also installs the mDNSResponder package:
-
-    opkg install dnssd-proxy
-
-At this point you can use DNS to discover services on the LAN interface of the OpenWrt router.
-Please be aware that there is no firewalling: you should not set this up on your edge router,
-or else anyone on the Internet will be able to discover services on your LAN.
+At this point you are ready to continue with configuring your Discovery Proxy.
 
 ## Picking a DNS Subdomain Name for your Advertised Services
 
@@ -223,18 +214,6 @@ On OpenWrt, the utilities are installed, so invoke them as follows, again changi
 On OpenWrt, generating the key may take as much as 3 minutes.
 Do not interrupt the key generation process.
 It’s just sitting there collecting random data, so it will eventually complete.
-
-dnssd-proxy loads the key and certificate from /etc/dnssd-proxy by default.
-These can be configured by adding lines to /etc/dnssd-proxy.cf (see below) specifying, e.g.:
-
-	tls-key /my/dir/server.key
-	tls-cert /my/dir/server.crt
-
-By default dnssd-proxy assumes a self-signed cert; if the cert has
-been signed by a ca, the ca cert file should also be provided (this may
-contain a certification chain rather than a single certificate):
-
-	tls-cacert /my/dir/ca.crt
 
 The dnssd-proxy operation is controlled by the file
 
