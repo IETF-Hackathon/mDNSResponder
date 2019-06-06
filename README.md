@@ -2,15 +2,48 @@
 
 This repository is used for IETF work on DNS-Based Service Discovery, particularly the DNS-SD Discovery Proxy.
 
+This code is Open Source under the Apache 2.0 license.
+
 This work is the product of the [IETF DNSSD Working Group](https://datatracker.ietf.org/wg/dnssd/about/).
 
-The specification for the DNS-SD Discovery Proxy can be found in [draft-ietf-dnssd-hybrid](https://tools.ietf.org/html/draft-ietf-dnssd-hybrid).
+The specification for the DNS-SD Discovery Proxy can be found in
+[draft-ietf-dnssd-hybrid](https://tools.ietf.org/html/draft-ietf-dnssd-hybrid).
 
 Other useful background reading includes
 [Multicast DNS (RFC 6762)](https://tools.ietf.org/html/rfc6762) and
 [DNS-Based Service Discovery (RFC 6763)](https://tools.ietf.org/html/rfc6763).
 
-This code is Open Source under the Apache 2.0 license.
+A very common use case where a DNS-SD Discovery Proxy is helpful is where
+your AirPrint printers are on wired Ethernet,
+but your iPhones and iPads are on Wi-Fi,
+which is a different link (and a different IPv4 subnet or IPv6 prefix).
+In this case, today, your iPhones and iPads on Wi-Fi can’t discover
+your AirPrint printers on wired Ethernet, because, by design,
+link-local [Multicast DNS](https://tools.ietf.org/html/rfc6762)
+does not cross between different links.
+
+By adding a DNS-SD Discovery Proxy on your wired Ethernet,
+and arranging for your Wi-Fi clients to add that DNS-SD Discovery Proxy
+as an additional DNS-SD (Bonjour) browsing domain,
+your Wi-Fi clients will now be able to discover and use those
+AirPrint printers on wired Ethernet.
+
+## Target Audience
+
+This sample code is made available for anyone wanting to experiment
+with the DNS-SD Discovery Proxy.
+
+However, the intended goal is not that end users and network administrators
+build and install their own DNS-SD Discovery Proxies.
+The intended goal is that vendors making Wi-Fi Access Points,
+routers, and home gateways, add this capability to their products.
+If you work for one of these vendors, and want to add
+DNS-SD Discovery Proxy capability to your products,
+please contact us for help about how to do that.
+
+This is pre-release code, and most likely still has some bugs.
+If you find bugs please help us improve the code by reporting any bugs you find,
+or by suggesting code changes in the form of Git pull requests.
 
 ## Building and Operating a DNS-SD Discovery Proxy on your Network
 
@@ -79,7 +112,7 @@ Now remove the dnsmasq package, since we’re installing a new DNS server:
 
     opkg remove dnsmasq
 
-Now install the ISC DHCP server, which is needed to provide DNS service now that dnsmasq is no longer present:
+Now install the ISC DHCP server, which is needed to provide DHCP service now that dnsmasq is no longer present:
 
     opkg install isc-dhcp-server-ipv4
 
@@ -158,14 +191,14 @@ On OpenWrt, generating the key may take a significant amount of time.   Do not i
 dnssd-proxy loads the key and certificate from /etc/dnssd-proxy by default.   These can be configured
 by adding lines to /etc/dnssd-proxy.cf (see below) specifying, e.g.:
 
-tls-key /my/dir/server.key
-tls-cert /my/dir/server.crt
+	tls-key /my/dir/server.key
+	tls-cert /my/dir/server.crt
 
 By default dnssd-proxy assumes a self-signed cert; if the cert has
 been signed by a ca, the ca cert file should also be provided (this may
 contain a certification chain rather than a single certificate):
 
-tls-cacert /my/dir/ca.crt
+	tls-cacert /my/dir/ca.crt
 
 The dnssd-proxy operation is controlled by the file
 
@@ -223,6 +256,11 @@ No manual client configuration is required.
 There are other ways that automatic configuration can be performed, described in
 [Section 11 of RFC 6763](https://tools.ietf.org/html/rfc6763#section-11).
 
+In an operational network, no client configuration is required.
+It is all completely automatic.
+However, for testing, unless you have the necessary DNS records created,
+you can simulate this via some manual client configuration.
+
 ### Manually adding a DNS search domain on the client, for testing
 
 If you don’t have the ability at this time to add a PTR record to your
@@ -239,7 +277,8 @@ Tap on the “i” button, Configure DNS, Manual, and then tap “Add Search Dom
 
 ### Manually adding a DNS resolver address on the client, for testing
 
-If “my-building.example.org” is properly delegated to your Discovery Proxy,
+If “my-building.example.org” is properly delegated to your Discovery Proxy
+using the appropriate “NS” record,
 then this is all that is required for client devices to remotely discover
 services on the “my-building.example.org” link.
 
