@@ -142,22 +142,30 @@ To generate the key and self-signed certificate, use the commands below.
 On a linux or MacOS install, you will run the gen_key and cert_write commands from your
 home directory (or the directory where you checked out mbedtls):
 
-	mbedtls/programs/pkey/gen_key type=rsa rsa_keysize=4096 filename=server.key
-	
-	mbedtls/programs/x509/cert_write selfsign=1 issuer_key=server.key issuer_name=CN=hostname.example.com not_before=20190226000000 not_after=20211231235959 is_ca=1 max_pathlen=0 output_file=server.crt
+    mkdir /etc/dnssd-proxy
+    cd /etc/dnssd-proxy
+    $HOME/mbedtls/programs/pkey/gen_key type=rsa rsa_keysize=4096 filename=server.key
+    $HOME/mbedtls/programs/x509/cert_write selfsign=1 issuer_key=server.key issuer_name=CN=hostname.example.com not_before=20190226000000 not_after=20211231235959 is_ca=1 max_pathlen=0 output_file=server.crt
 
 On OpenWrt, the utilities are installed, so invoke them as follows, again changing hostname.example.com to the correct hostname:
 
     cd /etc/dnssd-proxy
-	gen_key type=rsa rsa_keysize=4096 filename=server.key
+    gen_key type=rsa rsa_keysize=4096 filename=server.key
     cert_write selfsign=1 issuer_key=server.key issuer_name=CN=hostname.example.com not_before=20190226000000 not_after=20211231235959 is_ca=1 max_pathlen=0 output_file=server.crt
 
 On OpenWrt, generating the key may take a significant amount of time.   Do not interrupt the key generation process.   It's just sitting there collecting random data, so it will eventually complete.
 
-dnssd-proxy loads the key and certificate from its current working directory.  On OpenWrt this
-will be /etc/dnssd-proxy.  On Linux or MacOS, place the server.key and server.crt files in the
-working directory from which you will be running dnssd-proxy (usually the same directory where
-the executable resides).
+dnssd-proxy loads the key and certificate from /etc/dnssd-proxy by default.   These can be configured
+by adding lines to /etc/dnssd-proxy.cf (see below) specifying, e.g.:
+
+tls-key /my/dir/server.key
+tls-cert /my/dir/server.crt
+
+By default dnssd-proxy assumes a self-signed cert; if the cert has
+been signed by a ca, the ca cert file should also be provided (this may
+contain a certification chain rather than a single certificate):
+
+tls-cacert /my/dir/ca.crt
 
 The dnssd-proxy operation is controlled by the file
 

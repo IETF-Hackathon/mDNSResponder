@@ -37,7 +37,8 @@ struct tls_context {
 // tls_*.c:
 bool srp_tls_init(void);
 bool srp_tls_client_init(void);
-bool srp_tls_server_init(void);
+bool srp_tls_server_init(const char *NULLABLE cacert_file,
+			 const char *NULLABLE srvcrt_file, const char *NULLABLE server_key_file);
 bool srp_tls_accept_setup(comm_t *NONNULL comm);
 bool srp_tls_listen_callback(comm_t *NONNULL comm);
 bool srp_tls_connect_callback(comm_t *NONNULL comm);

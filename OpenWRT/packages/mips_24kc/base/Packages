@@ -4,10 +4,10 @@ Depends: libc, libc, libmbedtls, mDNSResponder
 License: Apache-2.0
 Section: net
 Architecture: mips_24kc
-Installed-Size: 36977
+Installed-Size: 37008
 Filename: dnssd-proxy_5_mips_24kc.ipk
-Size: 37861
-SHA256sum: 9862e08ded10f6edfea58bbcc611dfa05ba9869c10868f37bcc79ad8131c6aa4
+Size: 37890
+SHA256sum: 73bfcd3d39c05d3a1f9021b4d8050e2d6b8434403c777d9e6b63239e7595a360
 Description:  DNSSD-Proxy is a reference implementation of the IETF DNS Service Discovery Proxy.
  The Discovery Proxy proxies multicast DNS service from one network to another using
  the DNS protocol.   This allows devices on one link to discover services on another

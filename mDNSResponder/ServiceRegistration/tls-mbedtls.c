@@ -47,10 +47,6 @@ mbedtls_pk_context srvkey;
 mbedtls_ssl_config tls_server_config;
 mbedtls_ssl_config tls_client_config;
 
-const char *cacert_file = NULL;
-const char *srvcert_file = "server.crt";
-const char *server_key_file = "server.key";
-
 bool
 srp_tls_init(void)
 {
@@ -94,7 +90,7 @@ srp_tls_client_init(void)
 }
 
 bool
-srp_tls_server_init(void)
+srp_tls_server_init(const char *cacert_file, const char *srvcert_file, const char *server_key_file)
 {
     int status;
     

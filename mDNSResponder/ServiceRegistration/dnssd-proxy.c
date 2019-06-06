@@ -62,6 +62,9 @@ uint16_t tls_port;
 char *my_name = NULL;
 char *my_ipv4_addr = NULL;
 char *my_ipv6_addr = NULL;
+char *tls_cacert_filename = NULL;
+char *tls_cert_filename = "/etc/dnssd-proxy/server.crt";
+char *tls_key_filename = "/etc/dnssd-proxy/server.key";
 
 typedef struct hardwired hardwired_t;
 struct hardwired {
@@ -1463,6 +1466,21 @@ static bool my_ipv6_addr_handler(void *context, const char *filename, char **hun
     return config_string_handler(&my_ipv6_addr, filename, hunks[1], lineno, false, false);
 }
 
+static bool tls_key_handler(void *context, const char *filename, char **hunks, int num_hunks, int lineno)
+{
+    return config_string_handler(&tls_key_filename, filename, hunks[1], lineno, false, false);
+}
+
+static bool tls_cert_handler(void *context, const char *filename, char **hunks, int num_hunks, int lineno)
+{
+    return config_string_handler(&tls_cert_filename, filename, hunks[1], lineno, false, false);
+}
+
+static bool tls_cacert_handler(void *context, const char *filename, char **hunks, int num_hunks, int lineno)
+{
+    return config_string_handler(&tls_cacert_filename, filename, hunks[1], lineno, false, false);
+}
+
 config_file_verb_t dp_verbs[] = {
     { "interface",    3, 3, interface_handler },    // interface <name> <domain>
     { "nopush",       3, 3, interface_handler },    // nopush <name> <domain>
@@ -1470,6 +1488,9 @@ config_file_verb_t dp_verbs[] = {
     { "tcp-port",     2, 2, port_handler },         // tcp-port <number>
     { "tls-port",     2, 2, port_handler },         // tls-port <number>
     { "my-name",      2, 2, my_name_handler },      // my-name <domain name>
+    { "tls-key",      2, 2, tls_key_handler },      // tls-key <filename>
+    { "tls-cert",     2, 2, tls_cert_handler },     // tls-cert <filename>
+    { "tls-cacert",   2, 2, tls_cacert_handler },   // tls-cacert <filename>
     { "my-ipv4-addr", 2, 2, my_ipv4_addr_handler }, // my-ipv4-addr <IPv4 address>
     { "my-ipv6-addr", 2, 2, my_ipv6_addr_handler }  // my-ipv6-addr <IPv6 address>
 };
@@ -1500,7 +1521,7 @@ main(int argc, char **argv)
         return 1;
     }
 
-    if (!srp_tls_server_init()) {
+    if (!srp_tls_server_init(NULL, tls_key_filename, tls_cert_filename)) {
         return 1;
     }
 
