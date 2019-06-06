@@ -71,13 +71,22 @@ Now add this line to the end of /etc/opkg/customfeeds.conf:
 
     src/gz dnssd https://raw.githubusercontent.com/IETF-Hackathon/mDNSResponder/master/OpenWRT/packages/mips_24kc/base
 
+To fetch the new feed, once again:
+
+    opkg update
+
 Now remove the dnsmasq package, since we're installing a new DNS server:
 
     opkg remove dnsmasq
 
 Now install the ISC DHCP server, which is needed to provide DNS service now that dnsmasq is no longer present:
 
-    okpg install isc-dhcp-server-ipv4
+    opkg install isc-dhcp-server-ipv4
+
+You will also need to install the mbedtls-write package, which adds an mbedtls utility required to sign the
+self-signed cert that dnssd-proxy uses for the TLS connection:
+
+    opkg install mbedtls-write
 
 And finally, install the dnssd-proxy package, which also installs the mDNSResponder package:
 
@@ -119,7 +128,7 @@ If your DNS domain name is “example.org”
 then you could use “my-building.example.org”
 as the name for the link on which the Discovery Proxy resides.
 If you don’t have a suitable domain name you can use,
-then you can use “services.home.arpa”
+then you can use “service.home.arpa”
 as the name for the link on which the Discovery Proxy resides.
 
 ## Configuring and Running the Discovery Proxy
