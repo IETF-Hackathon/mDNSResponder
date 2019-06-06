@@ -27,7 +27,7 @@ There are four steps to building and operating a DNS-SD Discovery Proxy on your 
 ## Building the Discovery Proxy code
 
 If you want to build this code to run on a Mac or Linux machine, follow the instructions here.
-If you just want to run the prebuilt package on an OpenWRT device, you can skip ahead to
+If you just want to run the prebuilt package on an OpenWrt device, you can skip ahead to
 “Installing the Prebuilt Package”.
 
 Because this code is targeted at small embedded devices, it uses mbedtls.
@@ -52,10 +52,10 @@ At the moment prebuilt packages are only available for the router we are using i
 the [GL-iNet AR750S](https://www.gl-inet.com/products/gl-ar750s/).   These packages may also work on routers
 with similar configurations.
 
-There are two ways to install the proxy on an OpenWRT device.   These instructions explain how to do it using the command line; we will produce a video that shows how to do it using the user interface.
+There are two ways to install the proxy on an OpenWrt device.   These instructions explain how to do it using the command line; we will produce a video that shows how to do it using the user interface.
 
 To install the proxy using the command line, bring up a shell on your Mac, which must be
-connected to the OpenWRT device.  The OpenWRT device must have a working Internet connection.
+connected to the OpenWrt device.  The OpenWrt device must have a working Internet connection.
 To connect to the router, type:
 
     ssh 192.168.8.1 -l root
@@ -69,7 +69,7 @@ When you are at a command prompt on the router, install the libustream-mbedtls p
 	
 Now add this line to the end of /etc/opkg/customfeeds.conf:
 
-    src/gz dnssd https://raw.githubusercontent.com/IETF-Hackathon/mDNSResponder/master/OpenWRT/packages/mips_24kc/base
+    src/gz dnssd https://raw.githubusercontent.com/IETF-Hackathon/mDNSResponder/master/OpenWrt/packages/mips_24kc/base
 
 To fetch the new feed, once again:
 
@@ -92,7 +92,7 @@ And finally, install the dnssd-proxy package, which also installs the mDNSRespon
 
     opkg install dnssd-proxy
 
-At this point you can use DNS to discover services on the LAN interface of the OpenWRT router.   Please be aware that there is no firewalling: you should not set this up on your edge router, or else anyone on the Internet will be able to discover services on your LAN.
+At this point you can use DNS to discover services on the LAN interface of the OpenWrt router.   Please be aware that there is no firewalling: you should not set this up on your edge router, or else anyone on the Internet will be able to discover services on your LAN.
 
 ## Picking a DNS Subdomain Name for your Advertised Services
 
@@ -146,15 +146,15 @@ home directory (or the directory where you checked out mbedtls):
 	
 	mbedtls/programs/x509/cert_write selfsign=1 issuer_key=server.key issuer_name=CN=hostname.example.com not_before=20190226000000 not_after=20211231235959 is_ca=1 max_pathlen=0 output_file=server.crt
 
-On OpenWRT, the utilities are installed, so invoke them as follows, again changing hostname.example.com to the correct hostname:
+On OpenWrt, the utilities are installed, so invoke them as follows, again changing hostname.example.com to the correct hostname:
 
     cd /etc/dnssd-proxy
 	gen_key type=rsa rsa_keysize=4096 filename=server.key
     cert_write selfsign=1 issuer_key=server.key issuer_name=CN=hostname.example.com not_before=20190226000000 not_after=20211231235959 is_ca=1 max_pathlen=0 output_file=server.crt
 
-On OpenWRT, generating the key may take a significant amount of time.   Do not interrupt the key generation process.   It's just sitting there collecting random data, so it will eventually complete.
+On OpenWrt, generating the key may take a significant amount of time.   Do not interrupt the key generation process.   It's just sitting there collecting random data, so it will eventually complete.
 
-dnssd-proxy loads the key and certificate from its current working directory.  On OpenWRT this
+dnssd-proxy loads the key and certificate from its current working directory.  On OpenWrt this
 will be /etc/dnssd-proxy.  On Linux or MacOS, place the server.key and server.crt files in the
 working directory from which you will be running dnssd-proxy (usually the same directory where
 the executable resides).
