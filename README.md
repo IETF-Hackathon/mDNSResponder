@@ -60,7 +60,7 @@ To connect to the router, type:
 
     ssh 192.168.8.1 -l root
 
-Then enter the password that you configured when you set up the router.   You can also install an ssh key on the router using [the router's web user interface](http://192.168.8.1/cgi-bin/luci/admin/system/admin).
+Then enter the password that you configured when you set up the router.   You can also install an ssh key on the router using [the router’s web user interface](http://192.168.8.1/cgi-bin/luci/admin/system/admin).
 
 When you are at a command prompt on the router, install the libustream-mbedtls package, which is needed to do https downloads:
 
@@ -75,7 +75,7 @@ To fetch the new feed, once again:
 
     opkg update
 
-Now remove the dnsmasq package, since we're installing a new DNS server:
+Now remove the dnsmasq package, since we’re installing a new DNS server:
 
     opkg remove dnsmasq
 
@@ -137,7 +137,7 @@ Because the Discovery Proxy uses TLS, a key and certificate are required.
 Currently, for testing, self-signed certificates are allowed.
 
 To generate the key and self-signed certificate, use the commands below.
-''Replace hostname.example.com with the actual hostname of the Discovery Proxy device.''
+Replace hostname.example.com with the actual hostname of the Discovery Proxy device.
 
 On a linux or MacOS install, you will run the gen_key and cert_write commands from your
 home directory (or the directory where you checked out mbedtls).
@@ -153,7 +153,7 @@ On OpenWrt, the utilities are installed, so invoke them as follows, again changi
     gen_key type=rsa rsa_keysize=4096 filename=server.key
     cert_write selfsign=1 issuer_key=server.key issuer_name=CN=hostname.example.com not_before=20190226000000 not_after=20211231235959 is_ca=1 max_pathlen=0 output_file=server.crt
 
-On OpenWrt, generating the key may take a significant amount of time.   Do not interrupt the key generation process.   It's just sitting there collecting random data, so it will eventually complete.
+On OpenWrt, generating the key may take a significant amount of time.   Do not interrupt the key generation process.   It’s just sitting there collecting random data, so it will eventually complete.
 
 dnssd-proxy loads the key and certificate from /etc/dnssd-proxy by default.   These can be configured
 by adding lines to /etc/dnssd-proxy.cf (see below) specifying, e.g.:
@@ -178,6 +178,7 @@ Create this file with text as illustrated below:
 	my-ipv4-addr 203.0.113.123
 	udp-port 53
 	tcp-port 53
+	tls-port 853
 
 Replace “en0” with the name of the interface on which you want the Discovery Proxy to discover services.
 
