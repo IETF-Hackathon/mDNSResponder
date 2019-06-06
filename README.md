@@ -65,7 +65,7 @@ Then enter the password that you configured when you set up the router.   You ca
 When you are at a command prompt on the router, install the libustream-mbedtls package, which is needed to do https downloads:
 
     opkg update
-	opkg install libustream-mbedtls
+	opkg install libustream-mbedtls mbedtls-utils
 	
 Now add this line to the end of /etc/opkg/customfeeds.conf:
 
@@ -137,14 +137,27 @@ Because the Discovery Proxy uses TLS, a key and certificate are required.
 Currently, for testing, self-signed certificates are allowed.
 
 To generate the key and self-signed certificate, use the commands below.
-Replace hostname.example.com with the actual hostname of the Discovery Proxy device.
+''Replace hostname.example.com with the actual hostname of the Discovery Proxy device.''
+
+On a linux or MacOS install, you will run the gen_key and cert_write commands from your
+home directory (or the directory where you checked out mbedtls):
 
 	mbedtls/programs/pkey/gen_key type=rsa rsa_keysize=4096 filename=server.key
 	
 	mbedtls/programs/x509/cert_write selfsign=1 issuer_key=server.key issuer_name=CN=hostname.example.com not_before=20190226000000 not_after=20211231235959 is_ca=1 max_pathlen=0 output_file=server.crt
 
-Place the server.key and server.crt files in the working directory of the
-dnssd-proxy executable (usually the same directory where the executable resides).
+On OpenWRT, the utilities are installed, so invoke them as follows, again changing hostname.example.com to the correct hostname:
+
+    cd /etc/dnssd-proxy
+	gen_key type=rsa rsa_keysize=4096 filename=server.key
+    cert_write selfsign=1 issuer_key=server.key issuer_name=CN=hostname.example.com not_before=20190226000000 not_after=20211231235959 is_ca=1 max_pathlen=0 output_file=server.crt
+
+On OpenWRT, generating the key may take a significant amount of time.   Do not interrupt the key generation process.   It's just sitting there collecting random data, so it will eventually complete.
+
+dnssd-proxy loads the key and certificate from its current working directory.  On OpenWRT this
+will be /etc/dnssd-proxy.  On Linux or MacOS, place the server.key and server.crt files in the
+working directory from which you will be running dnssd-proxy (usually the same directory where
+the executable resides).
 
 The dnssd-proxy operation is controlled by the file
 
