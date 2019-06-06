@@ -39,7 +39,7 @@ If you don’t already have mbedtls installed, you can get it using the followin
 
 Clone this Git repository:
 
-	git clone https://github.com/IETF-Hackathon/mDNSResponder.git
+	git clone -branch release https://github.com/IETF-Hackathon/mDNSResponder.git
 
 Within your cloned copy of the repository,
 change directory to “mDNSResponder/ServiceRegistration” and type “make”.
@@ -69,7 +69,7 @@ When you are at a command prompt on the router, install the libustream-mbedtls p
 	
 Now add this line to the end of /etc/opkg/customfeeds.conf:
 
-    src/gz dnssd https://raw.githubusercontent.com/IETF-Hackathon/mDNSResponder/master/OpenWrt/packages/mips_24kc/base
+    src/gz dnssd https://raw.githubusercontent.com/IETF-Hackathon/mDNSResponder/release/OpenWrt/packages/mips_24kc/base
 
 To fetch the new feed, once again:
 
