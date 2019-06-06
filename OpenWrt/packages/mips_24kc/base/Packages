@@ -19,10 +19,10 @@ Depends: libc, libc, libmbedtls
 License: Apache-2.0
 Section: net
 Architecture: mips_24kc
-Installed-Size: 193776
+Installed-Size: 193809
 Filename: mDNSResponder_5_mips_24kc.ipk
-Size: 194614
-SHA256sum: 94e775009c5d01f271b3cd39b77541238bd566392e423ddc35625a379b27fb1d
+Size: 194629
+SHA256sum: 07ac4f3095e09f7fca8833db2ad5a108596a035d4cd681950dce8fc5acdf417d
 Description:  mDNSResponder is the Apple implementation of a DNSSD service discovery agent.   It
  can be used to discover services both on the local link using the Multicast DNS
  protocol, and on both local and non-local links using the DNS protocol.
@@ -40,3 +40,4 @@ SHA256sum: 1af617e72113dfdb31d40cb97ae9bc950807bd37662cd5875c458d0d97151dc2
 Description:  The aim of the mbedtls project is to provide a quality, open-source
  cryptographic library written in C and targeted at embedded systems.
  This package contains an mbedtls helper program to self-sign a cert.
+

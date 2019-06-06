@@ -1336,7 +1336,8 @@ mDNSlocal int SetupInterfaceList(mDNS *const m)
         struct ifaddrs *i = intfList;
         while (i)
         {
-            if (     ((i->ifa_addr->sa_family == AF_INET)
+            if (     i->ifa_addr != NULL &&
+                     ((i->ifa_addr->sa_family == AF_INET)
 #if HAVE_IPV6
                       || (i->ifa_addr->sa_family == AF_INET6)
 #endif
