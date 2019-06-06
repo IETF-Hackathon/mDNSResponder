@@ -4,7 +4,7 @@ This repository is used for IETF work on DNS-Based Service Discovery, particular
 
 This code is Open Source under the Apache 2.0 license.
 
-This work is the product of the [IETF DNSSD Working Group](https://datatracker.ietf.org/wg/dnssd/about/).
+This work is the product of the IETF [DNSSD](https://datatracker.ietf.org/wg/dnssd/about/) Working Group.
 
 The specification for the DNS-SD Discovery Proxy can be found in
 [draft-ietf-dnssd-hybrid](https://tools.ietf.org/html/draft-ietf-dnssd-hybrid).
@@ -12,6 +12,9 @@ The specification for the DNS-SD Discovery Proxy can be found in
 Other useful background reading includes
 [Multicast DNS (RFC 6762)](https://tools.ietf.org/html/rfc6762) and
 [DNS-Based Service Discovery (RFC 6763)](https://tools.ietf.org/html/rfc6763).
+
+This work was
+[presented at the 2019 Apple Worldwide Developer Conference (WWDC) networking session](https://developer.apple.com/videos/play/wwdc2019/713/).
 
 A very common use case where a DNS-SD Discovery Proxy is helpful is where
 your AirPrint printers are on wired Ethernet,
@@ -36,7 +39,7 @@ with the DNS-SD Discovery Proxy.
 However, the intended goal is not that end users and network administrators
 build and install their own DNS-SD Discovery Proxies.
 The intended goal is that vendors making Wi-Fi Access Points,
-routers, and home gateways, add this capability to their products.
+routers, and home gateways add this capability to their products.
 If you work for one of these vendors, and want to add
 DNS-SD Discovery Proxy capability to your products,
 please contact us for help about how to do that.
@@ -79,7 +82,7 @@ change directory to “mDNSResponder/ServiceRegistration” and type “make”.
 
 In the “build” subdirectory this will create the dnssd-proxy executable.
 
-## Installing the Prebuilt Package
+## Installing the Prebuilt Package for OpenWrt
 
 At the moment prebuilt packages are only available for the router we are using internally for development,
 the [GL-iNet AR750S](https://www.gl-inet.com/products/gl-ar750s/).
@@ -105,7 +108,7 @@ which is needed to do https downloads:
 	opkg update
 	opkg install libustream-mbedtls mbedtls-util
 	
-Now add this line to the end of /etc/opkg/customfeeds.conf, using the “vi” editor:
+Now add this line to the end of /etc/opkg/customfeeds.conf, using the “vi” editor or similar:
 
     src/gz dnssd https://raw.githubusercontent.com/IETF-Hackathon/mDNSResponder/release/OpenWrt/packages/mips_24kc/base
 
@@ -138,6 +141,11 @@ or else anyone on the Internet will be able to discover services on your LAN.
 
 DNS-Based Service Discovery, is based, naturally enough, on DNS domain names.
 
+Two DNS domain names are involved here,
+the DNS name for the advertised link, and
+the DNS hostname for the Discovery Proxy doing the advertising.
+These two names are different.
+
 For each physical (or virtual) link
 on your network for which you wish to enable remote discovery of services
 you need to chose a DNS domain name,
@@ -150,7 +158,6 @@ On each of the links
 on your network for which you wish to enable remote discovery of services
 you install a Discovery Proxy, to perform discovery operations on behalf of remote clients.
 The Discovery Proxy should be assigned a static IP address,
-with an associated DNS hostname,
 so that clients can reliably connect to it.
 
 For an initial trial you’ll probably want to start with a single Discovery Proxy
@@ -159,17 +166,38 @@ on a single link, to evaluate how well it works for your situation.
 In an operational network, for each link you will need a properly delegated subdomain,
 delegated (using DNS “NS” records) to the Discovery Proxy on that link,
 which acts as the authoritative DNS server for that DNS subdomain name.
+To delegate the link name subdomain to the appropriate Discovery Proxy,
+the Discovery Proxy device needs a DNS hostname, to go in the delegating DNS “NS” record.
+You can run a Discovery Proxy without a DNS hostname,
+but in this case you will not be able to use DNS delegation,
+and clients will have to be configured with the IP address of the Discovery Proxy,
+as explained below in the section “Manually adding a DNS resolver address”.
+If you don’t have a DNS hostname for your Discovery Proxy device,
+then where these instructions talk about the hostname, you can use the name
+“discoveryproxy.home.arpa” instead.
 
-For evaluation you can use a temporary name, without it being formally delegated.
+For evaluation you can use a temporary name for the link, without it being formally delegated.
 
 If you (or your organization) has a DNS domain name already,
-then you can use a subdomain of that name.
+then you can use a subdomain of that name for the link.
 If your DNS domain name is “example.org”
 then you could use “my-building.example.org”
 as the name for the link on which the Discovery Proxy resides.
+For testing, it is okay if this link subdomain name is not formally delegated to your Discovery Proxy.
 If you don’t have a suitable domain name you can use,
 then you can use “service.home.arpa”
 as the name for the link on which the Discovery Proxy resides.
+
+To recap:
+two DNS domain names are involved here,
+the DNS name for the advertised link, and
+the DNS hostname for the Discovery Proxy doing the advertising.
+These two names are different.
+One names the advertised link; the other names the device doing the advertising.
+By default the names for testing are:
+
+	Link name: service.home.arpa
+	Discovery Proxy hostname: discoveryproxy.home.arpa
 
 ## Configuring and Running the Discovery Proxy
 
@@ -177,20 +205,20 @@ Because the Discovery Proxy uses TLS, a key and certificate are required.
 Currently, for testing, self-signed certificates are allowed.
 
 To generate the key and self-signed certificate, use the commands below.
-Replace hostname.example.com with the actual hostname of the Discovery Proxy device.
+Replace the hostname discoveryproxy.home.arpa with the actual hostname of the Discovery Proxy device, if you have one.
 
 On a linux or MacOS install, you will run the gen_key and cert_write commands:
 
     $HOME/mbedtls/programs/pkey/gen_key type=rsa rsa_keysize=4096 filename=server.key
-    $HOME/mbedtls/programs/x509/cert_write selfsign=1 issuer_key=server.key issuer_name=CN=hostname.example.com not_before=20190226000000 not_after=20211231235959 is_ca=1 max_pathlen=0 output_file=server.crt
+    $HOME/mbedtls/programs/x509/cert_write selfsign=1 issuer_key=server.key issuer_name=CN=discoveryproxy.home.arpa not_before=20190226000000 not_after=20211231235959 is_ca=1 max_pathlen=0 output_file=server.crt
     sudo mkdir /etc/dnssd-proxy
     sudo mv server.key server.crt /etc/dnssd-proxy
 
-On OpenWrt, the utilities are installed, so invoke them as follows, again changing hostname.example.com to the correct hostname:
+On OpenWrt, the utilities are installed, so invoke them as follows, again changing discoveryproxy.home.arpa to the correct hostname:
 
     cd /etc/dnssd-proxy
     gen_key type=rsa rsa_keysize=4096 filename=server.key
-    cert_write selfsign=1 issuer_key=server.key issuer_name=CN=hostname.example.com not_before=20190226000000 not_after=20211231235959 is_ca=1 max_pathlen=0 output_file=server.crt
+    cert_write selfsign=1 issuer_key=server.key issuer_name=CN=discoveryproxy.home.arpa not_before=20190226000000 not_after=20211231235959 is_ca=1 max_pathlen=0 output_file=server.crt
 
 On OpenWrt, generating the key may take as much as 3 minutes.
 Do not interrupt the key generation process.
@@ -214,8 +242,8 @@ The dnssd-proxy operation is controlled by the file
 
 Create this file with text as illustrated below:
 
-	interface en0 my-building.example.org.
-	my-name my-hostname.example.org.
+	interface en0 service.home.arpa.
+	my-name discoveryproxy.home.arpa.
 	my-ipv4-addr 203.0.113.123
 	udp-port 53
 	tcp-port 53
@@ -227,10 +255,11 @@ To see the list of available interfaces, use the “ifconfig” command.
 On a modern Mac there are many.
 As a general rule, look for one of the “en” interfaces, where the flags say “UP,BROADCAST,…”
 
-Replace “my-building.example.org.” with your delegated subdomain name,
-or “service.home.arpa” if you have no delegated subdomain name.
+If you have a subdomain name for the link,
+replace “service.home.arpa” with that subdomain name.
 
-Replace “my-hostname.example.org” with the DNS hostname of your Discovery Proxy device.
+If your Discovery Proxy device has a DNS hostname,
+replace “discoveryproxy.home.arpa” with that DNS hostname.
 
 Replace “203.0.113.123” with the actual IP address of your Discovery Proxy device.
 
@@ -296,13 +325,13 @@ then you’ll need to manually configure your client devices to use
 the IP address of your Discovery Proxy as their DNS resolver.
 This will cause them to send all of their DNS requests to your Discovery Proxy.
 The Discovery Proxy will answer all the DNS requests it is responsible for
-(i.e., service discovery requests for “my-building.example.org”,
+(e.g., service discovery requests for “my-building.example.org”,
 “service.home.arpa”, or similar)
 and forward all others to its own default DNS resolver.
 
 To manually add a DNS resolver on macOS, go to System Preferences, Network.
 Select the currently active network interface and click “Advanced…”
-Select “DNS” and click “+” under “DNS Servers” to add a new search domain.
+Select “DNS”, click “+” under “DNS Servers” and enter the IP address of your Discovery Proxy.
 
 To manually add a DNS resolver on iOS, go to Settings, Wi-Fi.
 Tap on the “i” button, Configure DNS, Manual.
@@ -320,3 +349,21 @@ should be able to discover those and (firewall policy permitting) print on them.
 If you have Macs on the Discovery Proxy link with Remote Login enabled,
 then on other Macs, when you press Cmd-Shift-K in Terminal, you should
 discover those advertised ssh services, even when not directly connected to that link.
+
+## Support
+
+For help with getting this working, please post questions on the
+[Apple Developer Forum networking page](https://forums.developer.apple.com/community/core-os/networking).
+
+For discussion of the protocol design, and to get involved with its ongoing development,
+please join the IETF
+[DNSSD](https://datatracker.ietf.org/wg/dnssd/about/) Working Group’s
+[email list](https://www.ietf.org/mailman/listinfo/dnssd).
+
+Even if you have no problems setting up a Discovery Proxy,
+if you find the Discovery Proxy useful and would like to see it
+appear in commercial Wi-Fi Access Points, routers, and home gateways,
+please send a quick email to the DNSSD email list saying that.
+These implementation and deployment reports are very valuable
+for us to assess the interest the interest in this work and to
+guide its future development.
