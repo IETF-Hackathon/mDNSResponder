@@ -39,7 +39,7 @@ If you don’t already have mbedtls installed, you can get it using the followin
 
 Clone this Git repository:
 
-	git clone -branch release https://github.com/IETF-Hackathon/mDNSResponder.git
+	git clone --branch release https://github.com/IETF-Hackathon/mDNSResponder.git
 
 Within your cloned copy of the repository,
 change directory to “mDNSResponder/ServiceRegistration” and type “make”.
