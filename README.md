@@ -16,7 +16,7 @@ Other useful background reading includes
 This work was
 [presented at the 2019 Apple Worldwide Developer Conference (WWDC) networking session](https://developer.apple.com/videos/play/wwdc2019/713/).
 
-A very common use case where a DNS-SD Discovery Proxy is helpful is where
+A very common use case today where a DNS-SD Discovery Proxy is helpful is where
 your AirPrint printers are on wired Ethernet,
 but your iPhones and iPads are on Wi-Fi,
 which is a different link (and a different IPv4 subnet or IPv6 prefix).
@@ -92,7 +92,7 @@ There are two ways to install the proxy on an OpenWrt device.
 These instructions explain how to do it using the command line;
 we will produce a video that shows how to do it using the user interface.
 
-To install the proxy using the command line, bring up a shell on your Mac, which must be
+To install the proxy using the command line, bring up a Terminal window on your Mac, which must be
 connected to the OpenWrt device.  The OpenWrt device must have a working Internet connection.
 To connect to the router, type:
 
@@ -275,6 +275,8 @@ This Discovery Proxy, built using
 [DNS Stateful Operations](https://tools.ietf.org/html/rfc8490) and
 [DNS Push Notifications](https://tools.ietf.org/html/draft-ietf-dnssd-push),
 can be used with the current Apple developer seeds of iOS 13 and macOS Catalina.
+Older versions of iOS and macOS do not include support for
+DNS Stateful Operations and DNS Push Notifications.
 
 The client needs to be told in which DNS domains to look for services,
 in addition to “local”
@@ -321,7 +323,7 @@ services on the “my-building.example.org” link.
 
 If “my-building.example.org” is not yet delegated to your Discovery Proxy,
 or you’re using a temporary name like “service.home.arpa”,
-then you’ll need to manually configure your client devices to use
+then instead you’ll need to manually configure your client devices to use
 the IP address of your Discovery Proxy as their DNS resolver.
 This will cause them to send all of their DNS requests to your Discovery Proxy.
 The Discovery Proxy will answer all the DNS requests it is responsible for
