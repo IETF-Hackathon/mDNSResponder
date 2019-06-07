@@ -6039,8 +6039,6 @@ mDNSlocal void DNSPushProcessResponses(mDNS *const m, const DNSMessage *const ms
 {
     DNSQuestion *q;
     const mDNSu8 *ptr = firstAnswer;
-    mDNSIPPort port;
-    port.NotAnInteger = 0;
     ResourceRecord *mrr = &m->rec.r.resrec;
 
     // Validate the contents of the message
