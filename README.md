@@ -241,7 +241,16 @@ If your Discovery Proxy device has a DNS hostname,
 replace “discoveryproxy.home.arpa” with that DNS hostname.
 This is not necessary when running on the OpenWrt router,
 because the router automatically configures its hostname
-as "ns.service.home.arpa."
+as "ns.service.home.arpa."   On OpenWRT on the AR-750S, in order to enable
+service discovery on the WAN port, you may type the following:
+
+	uci set glfw.@opening[0].port='5353'
+	uci set glfw.@opening[0].name='mDNS'
+	uci set glfw.@opening[0].proto='UDP'
+	uci set glfw.@opening[0].status='Enabled'
+        uci commit
+
+It may be necessary to restart the router after doing this (type "reboot").
 
 Replace “203.0.113.123” with the actual IP address of your Discovery Proxy device.
 
@@ -276,6 +285,17 @@ No manual client configuration is required.
 
 There are other ways that automatic configuration can be performed, described in
 [Section 11 of RFC 6763](https://tools.ietf.org/html/rfc6763#section-11).
+
+On OpenWrt, the domain can be configured as follows:
+
+	uci set dhcp.isc_dhcpd.domain="service.home.arpa"
+	/etc/init.d/dhcpd restart
+
+If you are using the default configuration as we have described earlier, this will
+configure the correct domain; if you are using a different domain, that domain is
+the correct one to specify in this command, rather than service.home.arpa.
+You may need to disconnect from and reassociate with the router's Wifi network to
+get the new setting.
 
 In an operational network, no client configuration is required.
 It is all completely automatic.
