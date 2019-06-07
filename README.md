@@ -219,7 +219,7 @@ The dnssd-proxy operation is controlled by the file
 
 	/etc/dnssd-proxy.cf
 
-Create this file with text as illustrated below:
+If running on Linux or Mac, create this file with text as illustrated below:
 
 	interface en0 service.home.arpa.
 	my-name discoveryproxy.home.arpa.
@@ -239,6 +239,9 @@ replace “service.home.arpa” with that subdomain name.
 
 If your Discovery Proxy device has a DNS hostname,
 replace “discoveryproxy.home.arpa” with that DNS hostname.
+This is not necessary when running on the OpenWrt router,
+because the router automatically configures its hostname
+as "ns.service.home.arpa."
 
 Replace “203.0.113.123” with the actual IP address of your Discovery Proxy device.
 
