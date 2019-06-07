@@ -88,6 +88,17 @@ mDNSlocal void requestReadEvents(PosixEventSource *eventSource,
 mDNSlocal mStatus stopReadOrWriteEvents(int fd, mDNSBool freeSource, mDNSBool removeSource, int flags);
 mDNSlocal void requestWriteEvents(PosixEventSource *eventSource,
                                      const char *taskName, mDNSPosixEventCallback callback, void *context);
+mDNSlocal void UDPReadCallback(int fd, void *context);
+mDNSlocal int SetupIPv4Socket(int fd);
+mDNSlocal int SetupIPv6Socket(int fd);
+
+// ***************************************************************************
+// Constants
+
+static const int kOn = 1;
+static const int kIntTwoFiveFive = 255;
+static const unsigned char kByteTwoFiveFive = 255;
+
 // ***************************************************************************
 // Functions
 
@@ -150,6 +161,7 @@ mDNSexport mStatus mDNSPlatformSendUDP(const mDNS *const m, const void *const ms
     struct sockaddr_storage to;
     PosixNetworkInterface * thisIntf = (PosixNetworkInterface *)(InterfaceID);
     int sendingsocket = -1;
+    struct sockaddr *sa = (struct sockaddr *)&to;
 
     (void) useBackgroundTrafficClass;
 
@@ -190,15 +202,70 @@ mDNSexport mStatus mDNSPlatformSendUDP(const mDNS *const m, const void *const ms
     }
 #endif
 
-#ifdef POSIX_PORT_RANDOMIZATION
     // We don't open the socket until we get a send, because we don't know whether it's IPv4 or IPv6.
-    if (sock && sock->events.fd == -1) {
-        // Open the socket
-        // Randomize the port.
-    }        
-#else
-    (void)src;
+    if (src)
+    {
+        if (src->events.fd == -1)
+        {
+            int sock = socket(sa->sa_family, SOCK_DGRAM, IPPROTO_UDP);
+            struct sockaddr_storage from;
+            socklen_t fromlen;
+            int times = 0;
+            uint16_t *pport;
+
+            if (sock < 0)
+            {
+                LogMsg("Can't create UDP socket: %s", strerror(errno));
+                return PosixErrorToStatus(errno);
+            }
+
+            // Randomize the port.
+            if (src->randomizePort)
+            {
+                memset(&from, 0, sizeof from);
+                if (sa->sa_family == AF_INET)
+                {
+                    fromlen = sizeof (struct sockaddr_in);
+                    pport = &((struct sockaddr_in *)&from)->sin_port;
+                    err = SetupIPv4Socket(sock);
+                    if (err) { return err; }
+                }
+                else
+                {
+                    fromlen = sizeof (struct sockaddr_in6);
+                    pport = &((struct sockaddr_in6 *)&from)->sin6_port;
+                    err = SetupIPv6Socket(sock);
+                    if (err) { return err; }
+                }                
+#ifndef NOT_HAVE_SA_LEN
+                ((struct sockaddr *)&from)->sa_len = fromlen;
 #endif
+
+                while (times < 1000)
+                {
+                    *pport = 0xC000 + mDNSRandom(0x3FFF);
+                    if (bind(sock, (struct sockaddr *)&from, fromlen) >= 0)
+                    {
+                        src->port.NotAnInteger = *pport;
+                        src->events.fd = sock;
+                        break;
+                    }
+                    if (errno != EADDRINUSE)
+                    {
+                        LogMsg("Can't get randomized port: %m", strerror(errno));
+                        return PosixErrorToStatus(errno);
+                    }
+                }
+                if (src->events.fd == -1)
+                {
+                    LogMsg("Unable to get random port: too many tries.");
+                    return PosixErrorToStatus(EADDRINUSE);
+                }
+                requestReadEvents(&src->events, "mDNSPosix::UDPReadCallback", UDPReadCallback, src);
+            }
+        }
+        sendingsocket = src->events.fd;
+    }
 
     if (sendingsocket >= 0)
         err = sendto(sendingsocket, msg, (char*)end - (char*)msg, 0, (struct sockaddr *)&to, GET_SA_LEN(to));
@@ -298,10 +365,10 @@ mDNSlocal void tcpConnectCallback(int fd, void *context)
 }
 
 // This routine is called when the main loop detects that data is available on a socket.
-mDNSlocal void SocketDataReady(mDNS *const m, PosixNetworkInterface *intf, int skt)
+mDNSlocal void SocketDataReady(mDNS *const m, PosixNetworkInterface *intf, int skt, UDPSocket *sock)
 {
     mDNSAddr senderAddr, destAddr;
-    mDNSIPPort senderPort;
+    mDNSIPPort senderPort, destPort;
     ssize_t packetLen;
     DNSMessage packet;
     struct my_in_pktinfo packetInfo;
@@ -322,7 +389,7 @@ mDNSlocal void SocketDataReady(mDNS *const m, PosixNetworkInterface *intf, int s
     if (packetLen >= 0)
     {
         SockAddrTomDNSAddr((struct sockaddr*)&from, &senderAddr, &senderPort);
-        SockAddrTomDNSAddr((struct sockaddr*)&packetInfo.ipi_addr, &destAddr, NULL);
+        SockAddrTomDNSAddr((struct sockaddr*)&packetInfo.ipi_addr, &destAddr, &destPort);
 
         // If we have broken IP_RECVDSTADDR functionality (so far
         // I've only seen this on OpenBSD) then apply a hack to
@@ -394,7 +461,14 @@ mDNSlocal void SocketDataReady(mDNS *const m, PosixNetworkInterface *intf, int s
 
     if (packetLen >= 0)
         mDNSCoreReceive(m, &packet, (mDNSu8 *)&packet + packetLen,
-                        &senderAddr, senderPort, &destAddr, MulticastDNSPort, InterfaceID);
+                        &senderAddr, senderPort, &destAddr, sock == mDNSNULL ? MulticastDNSPort : sock->port, InterfaceID);
+}
+
+mDNSlocal void UDPReadCallback(int fd, void *context)
+{
+    extern mDNS mDNSStorage;
+
+    SocketDataReady(&mDNSStorage, mDNSNULL, fd, (UDPSocket *)context);
 }
 
 mDNSexport TCPSocket *mDNSPlatformTCPSocket(TCPSocketFlags flags, mDNSAddr_Type addrType, mDNSIPPort * port,
@@ -719,25 +793,17 @@ mDNSexport long mDNSPlatformWriteTCP(TCPSocket *sock, const char *msg, unsigned 
 
 mDNSexport UDPSocket *mDNSPlatformUDPSocket(mDNSIPPort port)
 {
-#ifdef POSIX_PORT_RANDOMIZATION
-    mStatus err;
-    mDNSBool randomizePort = mDNSIPPortIsZero(requestedport);
+    mDNSBool randomizePort = mDNSIPPortIsZero(port);
     UDPSocket *p = callocL("UDPSocket", sizeof(UDPSocket));
     if (!p) { LogMsg("mDNSPlatformUDPSocket: memory exhausted"); return(mDNSNULL); }
     p->randomizePort = randomizePort;
-    p->port = requestedport;
+    p->port = port;
     p->events.fd = -1;
     return(p);
-#else
-    static UDPSocket dummy;
-    (void)port;
-    return &dummy;
-#endif // POSIX_PORT_RANDOMIZATION
 }
 
 mDNSexport void mDNSPlatformUDPClose(UDPSocket *sock)
 {
-#ifdef POSIX_PORT_RANDOMIZATION
     if (sock && sock->events.fd != -1)
     {
         stopReadOrWriteEvents(sock->events.fd, mDNSfalse, mDNStrue,
@@ -745,8 +811,6 @@ mDNSexport void mDNSPlatformUDPClose(UDPSocket *sock)
         close(sock->events.fd);
         free(sock);
     }
-#endif // POSIX_PORT_RANDOMIZATION
-    (void)sock;
 }
 
 mDNSexport void mDNSPlatformUpdateProxyList(const mDNSInterfaceID InterfaceID)
@@ -979,15 +1043,50 @@ mDNSlocal void ClearInterfaceList(mDNS *const m)
     num_pkts_rejected = 0;
 }
 
+mDNSlocal int SetupIPv6Socket(int fd)
+{
+    int err;
+
+    #if defined(IPV6_PKTINFO)
+    err = setsockopt(fd, IPPROTO_IPV6, IPV6_2292_PKTINFO, &kOn, sizeof(kOn));
+    if (err < 0) { err = errno; perror("setsockopt - IPV6_PKTINFO"); }
+    #else
+        #warning This platform has no way to get the destination interface information for IPv6 -- will only work for single-homed hosts
+    #endif
+    return err;
+}
+
+mDNSlocal int SetupIPv4Socket(int fd)
+{
+    int err;
+
+#if defined(IP_PKTINFO)                                 // Linux
+    err = setsockopt(fd, IPPROTO_IP, IP_PKTINFO, &kOn, sizeof(kOn));
+    if (err < 0) { err = errno; perror("setsockopt - IP_PKTINFO"); }
+#elif defined(IP_RECVDSTADDR) || defined(IP_RECVIF)     // BSD and Solaris
+#if defined(IP_RECVDSTADDR)
+    err = setsockopt(fd, IPPROTO_IP, IP_RECVDSTADDR, &kOn, sizeof(kOn));
+    if (err < 0) { err = errno; perror("setsockopt - IP_RECVDSTADDR"); }
+#endif
+#if defined(IP_RECVIF)
+    if (err == 0)
+    {
+        err = setsockopt(fd, IPPROTO_IP, IP_RECVIF, &kOn, sizeof(kOn));
+        if (err < 0) { err = errno; perror("setsockopt - IP_RECVIF"); }
+    }
+#endif
+#else
+#warning This platform has no way to get the destination interface information -- will only work for single-homed hosts
+#endif
+    return err;
+}
+
 // Sets up a send/receive socket.
 // If mDNSIPPort port is non-zero, then it's a multicast socket on the specified interface
 // If mDNSIPPort port is zero, then it's a randomly assigned port number, used for sending unicast queries
 mDNSlocal int SetupSocket(struct sockaddr *intfAddr, mDNSIPPort port, int interfaceIndex, int *sktPtr)
 {
     int err = 0;
-    static const int kOn = 1;
-    static const int kIntTwoFiveFive = 255;
-    static const unsigned char kByteTwoFiveFive = 255;
     const mDNSBool JoinMulticastGroup = (port.NotAnInteger != 0);
 
     (void) interfaceIndex;  // This parameter unused on plaforms that don't have IPv6
@@ -1046,24 +1145,7 @@ mDNSlocal int SetupSocket(struct sockaddr *intfAddr, mDNSIPPort port, int interf
         struct sockaddr_in bindAddr;
         if (err == 0)
         {
-            #if defined(IP_PKTINFO)                                 // Linux
-            err = setsockopt(*sktPtr, IPPROTO_IP, IP_PKTINFO, &kOn, sizeof(kOn));
-            if (err < 0) { err = errno; perror("setsockopt - IP_PKTINFO"); }
-            #elif defined(IP_RECVDSTADDR) || defined(IP_RECVIF)     // BSD and Solaris
-                #if defined(IP_RECVDSTADDR)
-            err = setsockopt(*sktPtr, IPPROTO_IP, IP_RECVDSTADDR, &kOn, sizeof(kOn));
-            if (err < 0) { err = errno; perror("setsockopt - IP_RECVDSTADDR"); }
-                #endif
-                #if defined(IP_RECVIF)
-            if (err == 0)
-            {
-                err = setsockopt(*sktPtr, IPPROTO_IP, IP_RECVIF, &kOn, sizeof(kOn));
-                if (err < 0) { err = errno; perror("setsockopt - IP_RECVIF"); }
-            }
-                #endif
-            #else
-                #warning This platform has no way to get the destination interface information -- will only work for single-homed hosts
-            #endif
+            err = SetupIPv4Socket(*sktPtr);
         }
     #if defined(IP_RECVTTL)                                 // Linux
         if (err == 0)
@@ -1122,15 +1204,9 @@ mDNSlocal int SetupSocket(struct sockaddr *intfAddr, mDNSIPPort port, int interf
     {
         struct ipv6_mreq imr6;
         struct sockaddr_in6 bindAddr6;
-    #if defined(IPV6_PKTINFO)
-        if (err == 0)
-        {
-            err = setsockopt(*sktPtr, IPPROTO_IPV6, IPV6_2292_PKTINFO, &kOn, sizeof(kOn));
-            if (err < 0) { err = errno; perror("setsockopt - IPV6_PKTINFO"); }
+        if (err == 0) {
+            err = SetupIPv6Socket(*sktPtr);
         }
-    #else
-        #warning This platform has no way to get the destination interface information for IPv6 -- will only work for single-homed hosts
-    #endif
     #if defined(IPV6_HOPLIMIT)
         if (err == 0)
         {
@@ -2142,13 +2218,13 @@ mDNSexport void mDNSPosixProcessFDSet(mDNS *const m, fd_set *readfds, fd_set *wr
     if (m->p->unicastSocket4 != -1 && FD_ISSET(m->p->unicastSocket4, readfds))
     {
         FD_CLR(m->p->unicastSocket4, readfds);
-        SocketDataReady(m, NULL, m->p->unicastSocket4);
+        SocketDataReady(m, NULL, m->p->unicastSocket4, NULL);
     }
 #if HAVE_IPV6
     if (m->p->unicastSocket6 != -1 && FD_ISSET(m->p->unicastSocket6, readfds))
     {
         FD_CLR(m->p->unicastSocket6, readfds);
-        SocketDataReady(m, NULL, m->p->unicastSocket6);
+        SocketDataReady(m, NULL, m->p->unicastSocket6, NULL);
     }
 #endif
 
@@ -2157,13 +2233,13 @@ mDNSexport void mDNSPosixProcessFDSet(mDNS *const m, fd_set *readfds, fd_set *wr
         if (info->multicastSocket4 != -1 && FD_ISSET(info->multicastSocket4, readfds))
         {
             FD_CLR(info->multicastSocket4, readfds);
-            SocketDataReady(m, info, info->multicastSocket4);
+            SocketDataReady(m, info, info->multicastSocket4, NULL);
         }
 #if HAVE_IPV6
         if (info->multicastSocket6 != -1 && FD_ISSET(info->multicastSocket6, readfds))
         {
             FD_CLR(info->multicastSocket6, readfds);
-            SocketDataReady(m, info, info->multicastSocket6);
+            SocketDataReady(m, info, info->multicastSocket6, NULL);
         }
 #endif
         info = (PosixNetworkInterface *)(info->coreIntf.next);
