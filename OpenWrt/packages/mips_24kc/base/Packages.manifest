@@ -23,10 +23,10 @@ License: Apache-2.0
 Section: net
 Maintainer: Ted Lemon <mellon@fugue.com>
 Architecture: mips_24kc
-Installed-Size: 194177
+Installed-Size: 194401
 Filename: mDNSResponder_5_mips_24kc.ipk
-Size: 194950
-SHA256sum: 7c50e15cdfdcea51a2b792d1be03b81ad9993f193c43d249a34f9b7d44270c9f
+Size: 195196
+SHA256sum: 62a2d272a59d3d62bdfc5cbf007a7a7e57a739fe5ce611318d20675551011005
 Description:  mDNSResponder is the Apple implementation of a DNSSD service discovery agent.   It
  can be used to discover services both on the local link using the Multicast DNS
  protocol, and on both local and non-local links using the DNS protocol.
