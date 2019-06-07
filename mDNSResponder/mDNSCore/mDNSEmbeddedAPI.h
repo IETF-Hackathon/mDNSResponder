@@ -285,7 +285,7 @@ typedef struct mDNSInterfaceID_dummystruct { void *dummy; } *mDNSInterfaceID;
 // Use when printing interface IDs; the interface ID is actually a pointer, but we're only using
 // the pointer as a unique identifier, and in special cases it's actually a small number.   So there's
 // little point in printing all 64 bits--the upper 32 bits in particular will not add information.
-#define IIDPrintable(x) ((uint32_t)(uint64_t)(x))
+#define IIDPrintable(x) ((uint32_t)((size_t)(x)) & 0xffffffffULL)
 
 // These types are for opaque two- and four-byte identifiers.
 // The "NotAnInteger" fields of the unions allow the value to be conveniently passed around in a
