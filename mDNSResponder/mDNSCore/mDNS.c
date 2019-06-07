@@ -8059,6 +8059,7 @@ mDNSlocal mDNSBool TrustedSource(const mDNS *const m, const mDNSAddr *const srca
 }
 #endif
 
+#define DEFINED_UDP_SOCKET_STRUCT
 struct UDPSocket_struct
 {
     mDNSIPPort port; // MUST BE FIRST FIELD -- mDNSCoreReceive expects every UDPSocket_struct to begin with mDNSIPPort port
