@@ -248,7 +248,7 @@ service discovery on the WAN port, you may type the following:
 	uci set glfw.@opening[0].name='mDNS'
 	uci set glfw.@opening[0].proto='UDP'
 	uci set glfw.@opening[0].status='Enabled'
-        uci commit
+	uci commit
 
 It may be necessary to restart the router after doing this (type "reboot").
 
