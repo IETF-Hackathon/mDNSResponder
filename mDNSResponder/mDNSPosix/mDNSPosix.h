@@ -78,15 +78,17 @@ struct PosixEventSource
 };
 typedef struct PosixEventSource PosixEventSource;
     
+#ifndef DEFINED_UDP_SOCKET_STRUCT
 struct UDPSocket_struct
 {
+    mDNSIPPort port;
     PosixEventSource events;
     mDNSAddr remoteAddress;
     mDNSIPPort remotePort;
     mDNSBool setup;
     mDNSBool randomizePort;
-    mDNSIPPort port;
 };
+#endif // DEFINED_UDP_SOCKET_STRUCT
 
 struct TCPSocket_struct
 {
