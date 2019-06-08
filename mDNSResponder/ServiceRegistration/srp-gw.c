@@ -1617,27 +1617,28 @@ main(int argc, char **argv)
     }
 
     // Set up listeners
-    if (!setup_listener_socket(AF_INET, IPPROTO_UDP, false, listen_port, "UDPv4 listener", dns_input, 0, 0)) {
+    // XXX UDP listeners should bind to interface addresses, not INADDR_ANY.
+    if (!setup_listener_socket(AF_INET, IPPROTO_UDP, false, listen_port, NULL, "UDPv4 listener", dns_input, 0, 0)) {
         ERROR("UDPv4 listener: fail.");
         return 1;
     }
-    if (!setup_listener_socket(AF_INET6, IPPROTO_UDP, false, listen_port, "UDPv6 listener", dns_input, 0, 0)) {
+    if (!setup_listener_socket(AF_INET6, IPPROTO_UDP, false, listen_port, NULL, "UDPv6 listener", dns_input, 0, 0)) {
         ERROR("UDPv6 listener: fail.");
         return 1;
     }
-    if (!setup_listener_socket(AF_INET, IPPROTO_TCP, false, listen_port, "TCPv4 listener", dns_input, 0, 0)) {
+    if (!setup_listener_socket(AF_INET, IPPROTO_TCP, false, listen_port, NULL, "TCPv4 listener", dns_input, 0, 0)) {
         ERROR("TCPv4 listener: fail.");
         return 1;
     }
-    if (!setup_listener_socket(AF_INET6, IPPROTO_TCP, false, listen_port, "TCPv6 listener", dns_input, 0, 0)) {
+    if (!setup_listener_socket(AF_INET6, IPPROTO_TCP, false, listen_port, NULL, "TCPv6 listener", dns_input, 0, 0)) {
         ERROR("TCPv6 listener: fail.");
         return 1;
     }
-    if (!setup_listener_socket(AF_INET, IPPROTO_TCP, true, listen_port, "TLSv4 listener", dns_input, 0, 0)) {
+    if (!setup_listener_socket(AF_INET, IPPROTO_TCP, true, listen_port, NULL, "TLSv4 listener", dns_input, 0, 0)) {
         ERROR("TLSv4 listener: fail.");
         return 1;
     }
-    if (!setup_listener_socket(AF_INET6, IPPROTO_TCP, true, listen_port, "TLSv6 listener", dns_input, 0, 0)) {
+    if (!setup_listener_socket(AF_INET6, IPPROTO_TCP, true, listen_port, NULL, "TLSv6 listener", dns_input, 0, 0)) {
         ERROR("TLSv6 listener: fail.");
         return 1;
     }

@@ -1,6 +1,6 @@
-/* dispatch.c
+/* ioloop.c
  *
- * Copyright (c) 2018 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2018-2019 Apple Computer, Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -625,8 +625,8 @@ listen_callback(io_t *context)
 }
 
 comm_t *
-setup_listener_socket(int family, int protocol, bool tls, uint16_t port, const char *name,
-                      comm_callback_t datagram_callback,
+setup_listener_socket(int family, int protocol, bool tls, uint16_t port, const char *ip_address,
+                      const char *name, comm_callback_t datagram_callback,
                       comm_callback_t connected, void *context)
 {
     comm_t *listener;
@@ -659,9 +659,23 @@ setup_listener_socket(int family, int protocol, bool tls, uint16_t port, const c
     if (family == AF_INET) {
         sl = sizeof listener->address.sin;
         listener->address.sin.sin_port = port ? htons(port) : htons(53);
+        if (ip_address != NULL) {
+            if (!inet_pton(AF_INET, ip_address, &listener->address.sin.sin_addr)) {
+                ERROR("Invalid IPv4 address: %s", ip_address);
+                comm_free(listener);
+                return NULL;
+            }
+        }
     } else {
         sl = sizeof listener->address.sin6;
         listener->address.sin6.sin6_port = port ? htons(port) : htons(53);
+        if (ip_address != NULL) {
+            if (!inet_pton(AF_INET6, ip_address, &listener->address.sin.sin_addr)) {
+                ERROR("Invalid IPv6 address: %s", ip_address);
+                comm_free(listener);
+                return NULL;
+            }
+        }
     }
     listener->address.sa.sa_family = family;
 #ifndef NOT_HAVE_SA_LEN

@@ -97,7 +97,8 @@ void ioloop_close(io_t *NONNULL io);
 void add_reader(io_t *NONNULL io, io_callback_t NONNULL callback, io_callback_t NULLABLE finalize);
 bool ioloop_init(void);
 int ioloop_events(int64_t timeout_when);
-comm_t *NULLABLE setup_listener_socket(int family, int protocol, bool tls, uint16_t port, const char *NONNULL name,
+comm_t *NULLABLE setup_listener_socket(int family, int protocol, bool tls, uint16_t port,
+                                       const char *NULLABLE ip_address, const char *NONNULL name,
                                        comm_callback_t NONNULL datagram_callback,
                                        comm_callback_t NULLABLE connected, void *NULLABLE context);
 comm_t *NULLABLE connect_to_host(addr_t *NONNULL remote_address, bool tls,
