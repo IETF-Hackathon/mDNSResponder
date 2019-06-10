@@ -14,22 +14,37 @@ Other useful background reading includes
 [DNS-Based Service Discovery (RFC 6763)](https://tools.ietf.org/html/rfc6763).
 
 This work was
-[presented at the 2019 Apple Worldwide Developer Conference (WWDC) networking session](https://developer.apple.com/videos/play/wwdc2019/713/).
+[presented at the 2019 Apple Worldwide Developer Conference (WWDC) networking session](https://developer.apple.com/videos/play/wwdc2019/713/?time=112).
 
-A very common use case today where a DNS-SD Discovery Proxy is helpful is where
-your AirPrint printers are on wired Ethernet,
-but your iPhones and iPads are on Wi-Fi,
-which is a different link (and a different IPv4 subnet or IPv6 prefix).
-In this case, today, your iPhones and iPads on Wi-Fi can’t discover
-your AirPrint printers on wired Ethernet, because, by design,
-link-local [Multicast DNS](https://tools.ietf.org/html/rfc6762)
+This document last updated 2019-06-10.
+
+## Example Scenario
+
+A very common configuration in many company networks today is that
+the network printers (which all support AirPrint) are connected to wired Ethernet,
+and the iPhones and iPads (which also support AirPrint) are connected via Wi-Fi,
+which is a different link, and a different IPv4 subnet and/or IPv6 prefix.
+This means that the iPhones and iPads on Wi-Fi can’t discover the AirPrint printers on Ethernet,
+because, by design, link-local [Multicast DNS](https://tools.ietf.org/html/rfc6762)
 does not cross between different links.
+In addition, even if the Wi-Fi Access Point were configured to bridge between
+Ethernet and Wi-Fi, making them one logical link, there are other impediments
+to multicast-based discovery.
+Multicast on Wi-Fi is unreliable, slow, and very wasteful of precious wireless spectrum.
+Because of this, it is becoming increasingly common to limit or disable multicast on Wi-Fi,
+thereby breaking discovery even in cases where you might have expected it to work.
 
-By adding a DNS-SD Discovery Proxy on your wired Ethernet,
-and arranging for your Wi-Fi clients to add that DNS-SD Discovery Proxy
-as an additional DNS-SD (Bonjour) browsing domain,
-your Wi-Fi clients will now be able to discover and use those
-AirPrint printers on wired Ethernet.
+Installing a DNS-SD Discovery Proxy,
+either on the Wi-Fi Access Point itself,
+or on any other device connected to the wired Ethernet,
+solves this problem.
+With the appropriate automated configuration in place,
+clients on Wi-Fi automatically know to talk to that proxy to perform
+[Multicast DNS](https://tools.ietf.org/html/rfc6762)
+queries on their behalf.
+In this way, clients on Wi-Fi are able to perform service discovery exclusively using unicast,
+even in configurations where multicast is entirely disabled on the Wi-Fi network.
+Your clients on Wi-Fi will now be able to discover and use those AirPrint printers on wired Ethernet.
 
 ## Target Audience
 
