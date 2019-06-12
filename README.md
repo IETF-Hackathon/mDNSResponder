@@ -84,9 +84,13 @@ If you just want to run the prebuilt package on an OpenWrt device, you can skip 
 Because this code is targeted at small embedded devices, it uses mbedtls.
 If you don’t already have mbedtls installed, you can get it using the following commands:
 
-	git clone https://github.com/ARMmbed/mbedtls
+	git clone --recursive https://github.com/ARMmbed/mbedtls
 	make
 	sudo make install
+
+The tests need Python to be built and Perl to be run. If you don't have one of them installed, you can skip building the tests with:
+
+	make no_test
 
 Clone this Git repository:
 
@@ -122,7 +126,7 @@ to enable secure https package downloads:
 
 	opkg update
 	opkg install libustream-mbedtls mbedtls-util
-	
+
 Now add a line to the end of /etc/opkg/customfeeds.conf to add our OpenWrt package, as shown below:
 
     echo 'src/gz dnssd https://raw.githubusercontent.com/IETF-Hackathon/mDNSResponder/release/OpenWrt/packages/mips_24kc/base' >> /etc/opkg/customfeeds.conf
