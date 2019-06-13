@@ -16,7 +16,7 @@ Other useful background reading includes
 This work was
 [presented at the 2019 Apple Worldwide Developer Conference (WWDC) networking session](https://developer.apple.com/videos/play/wwdc2019/713/?time=112).
 
-This document last updated 2019-06-10.
+This document last updated 2019-06-12.
 
 ## Example Scenario
 
@@ -372,6 +372,11 @@ should be able to discover those and (firewall policy permitting) print on them.
 If you have Macs on the Discovery Proxy link with Remote Login enabled,
 then on other Macs, when you press Cmd-Shift-K in Terminal, you should
 discover those advertised ssh services, even when not directly connected to that link.
+
+Note: This works for all service types *except* AirPlay.
+For policy reasons
+Apple requires AirPlay clients and servers to be within the same broadcast domain,
+and prohibits the use of unicast for discovering AirPlay services.
 
 ## Support
 
