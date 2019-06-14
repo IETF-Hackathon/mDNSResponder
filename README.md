@@ -259,7 +259,7 @@ If your Discovery Proxy device has a DNS hostname,
 replace “discoveryproxy.home.arpa” with that DNS hostname.
 This is not necessary when running on the OpenWrt router,
 because the router automatically configures its hostname
-as "ns.service.home.arpa."
+appropriately.
 
 Replace “203.0.113.123” with the actual IP address of your Discovery Proxy device.
 
