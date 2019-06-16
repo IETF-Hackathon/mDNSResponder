@@ -1750,12 +1750,6 @@ main(int argc, char **argv)
         INFO("Started %s", listener[i]->name);
     }
 
-    // Start route socket listener...
-    if (!start_route_listener()) {
-        return 1;
-    }
-    INFO("Started routing socket listener.");
-    
     do {
         int something = 0;
         something = ioloop_events(0);
