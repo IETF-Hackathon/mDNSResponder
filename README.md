@@ -16,7 +16,7 @@ Other useful background reading includes
 This work was
 [presented at the 2019 Apple Worldwide Developer Conference (WWDC) networking session](https://developer.apple.com/videos/play/wwdc2019/713/?time=112).
 
-This document last updated 2019-06-10.
+This document last updated 2019-06-13.
 
 ## Example Scenario
 
@@ -248,7 +248,6 @@ If running on Linux or Mac, create this file with text as illustrated below:
 	tls-port 853
 
 Replace “en0” with the name of the interface on which you want the Discovery Proxy to discover services.
-
 To see the list of available interfaces, use the “ifconfig” command.
 On a modern Mac there are many.
 As a general rule, look for one of the “en” interfaces, where the flags say “UP,BROADCAST,…”
@@ -260,8 +259,17 @@ If your Discovery Proxy device has a DNS hostname,
 replace “discoveryproxy.home.arpa” with that DNS hostname.
 This is not necessary when running on the OpenWrt router,
 because the router automatically configures its hostname
-as "ns.service.home.arpa."   On OpenWRT on the AR-750S, in order to enable
-service discovery on the WAN port, you may type the following:
+appropriately.
+
+Replace “203.0.113.123” with the actual IP address of your Discovery Proxy device.
+
+Once you have the key, the certificate, and the configuration file in place,
+on Linux or Mac run the dnssd-proxy executable in a Terminal window.
+You should see some lines beginning “hardwired_add”,
+followed by “waiting” when the dnssd-proxy is ready to start processing requests.
+
+On OpenWrt on the AR-750S, in order to enable
+service discovery on the WAN port, type the following:
 
 	uci set glfw.@opening[0].port='5353'
 	uci set glfw.@opening[0].name='mDNS'
@@ -269,15 +277,7 @@ service discovery on the WAN port, you may type the following:
 	uci set glfw.@opening[0].status='Enabled'
 	uci commit
 
-It may be necessary to restart the router after doing this (type "reboot").
-
-Replace “203.0.113.123” with the actual IP address of your Discovery Proxy device.
-
-Once you have the key, the certificate, and the configuration file in place,
-run the dnssd-proxy executable in a Terminal window.
-
-You should see some lines beginning “hardwired_add”,
-followed by “waiting” when the dnssd-proxy is ready to start processing requests.
+Once complete, type “reboot” to restart the router.
 
 ## Configuring Clients with Your Chosen DNS Subdomain Name for Wide-Area Discovery
 
@@ -372,6 +372,11 @@ should be able to discover those and (firewall policy permitting) print on them.
 If you have Macs on the Discovery Proxy link with Remote Login enabled,
 then on other Macs, when you press Cmd-Shift-K in Terminal, you should
 discover those advertised ssh services, even when not directly connected to that link.
+
+Note: This works for all service types *except* AirPlay.
+For policy reasons
+Apple requires AirPlay clients and servers to be within the same broadcast domain,
+and prohibits the use of unicast for discovering AirPlay services.
 
 ## Support
 
