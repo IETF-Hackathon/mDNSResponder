@@ -398,11 +398,26 @@ udp_read_callback(io_t *io)
 
             memcpy(&pktinfo, CMSG_DATA(cmh), sizeof pktinfo);
             message->ifindex = pktinfo.ipi6_ifindex;
+
+            /* Get the destination address, for use when replying. */
+            message->local.sin6.sin6_family = AF_INET6;
+            message->local.sin6.sin6_port = 0;
+            message->local.sin6.sin6_addr = pktinfo.ipi6_addr;
+#ifndef NOT_HAVE_SA_LEN
+            message->local.sin6.sin6_len = sizeof message->local;
+#endif
         } else if (cmh->cmsg_level == IPPROTO_IP && cmh->cmsg_type == IP_PKTINFO) { 
             struct in_pktinfo pktinfo;
           
             memcpy(&pktinfo, CMSG_DATA(cmh), sizeof pktinfo);
             message->ifindex = pktinfo.ipi_ifindex;
+
+            message->local.sin.sin_family = AF_INET;
+            message->local.sin.sin_port = 0;
+            message->local.sin.sin_addr = pktinfo.ipi_addr;
+#ifndef NOT_HAVE_SA_LEN
+            message->local.sin.sin_len = sizeof message->local;
+#endif
         }
     }
     connection->message = message;
@@ -544,16 +559,42 @@ static void
 udp_send_response(comm_t *comm, message_t *responding_to, struct iovec *iov, int iov_len)
 {
     struct msghdr mh;
+    uint8_t cmsg_buf[128];
+    struct cmsghdr *cmsg;
+    
     memset(&mh, 0, sizeof mh);
     mh.msg_iov = iov;
     mh.msg_iovlen = iov_len;
     mh.msg_name = &responding_to->src;
+    mh.msg_control = cmsg_buf;
+    mh.msg_controllen = sizeof cmsg_buf;
+    cmsg = CMSG_FIRSTHDR(&mh);
+
     if (responding_to->src.sa.sa_family == AF_INET) {
+        struct in_pktinfo *inp;
         mh.msg_namelen = sizeof (struct sockaddr_in);
+        mh.msg_controllen = CMSG_SPACE(sizeof *inp);
+        cmsg->cmsg_level = IPPROTO_IP;
+        cmsg->cmsg_type = IP_PKTINFO;
+        cmsg->cmsg_len = CMSG_LEN(sizeof *inp);
+        inp = (struct in_pktinfo *)CMSG_DATA(cmsg);
+        memset(inp, 0, sizeof *inp);
+        inp->ipi_ifindex = responding_to->ifindex;
+        inp->ipi_spec_dst = responding_to->local.sin.sin_addr;
+        inp->ipi_addr = responding_to->local.sin.sin_addr;
     } else if (responding_to->src.sa.sa_family == AF_INET6) {
+        struct in6_pktinfo *inp;
         mh.msg_namelen = sizeof (struct sockaddr_in6);
+        mh.msg_controllen = CMSG_SPACE(sizeof *inp);
+        cmsg->cmsg_level = IPPROTO_IPV6;
+        cmsg->cmsg_type = IPV6_PKTINFO;
+        cmsg->cmsg_len = CMSG_LEN(sizeof *inp);
+        inp = (struct in6_pktinfo *)CMSG_DATA(cmsg);
+        memset(inp, 0, sizeof *inp);
+        inp->ipi6_ifindex = responding_to->ifindex;
+        inp->ipi6_addr = responding_to->local.sin6.sin6_addr;
     } else {
-        ERROR("send_udp_response: unknown family %d", responding_to->src.sa.sa_family);
+        ERROR("udp_send_response: unknown family %d", responding_to->src.sa.sa_family);
         abort();
     }
     sendmsg(comm->io.sock, &mh, 0);
@@ -649,34 +690,34 @@ setup_listener_socket(int family, int protocol, bool tls, uint16_t port, const c
         comm_free(listener);
         return NULL;
     }
-    rv = setsockopt(listener->io.sock, SOL_SOCKET, SO_REUSEPORT, &flag, sizeof flag);
+    rv = setsockopt(listener->io.sock, SOL_SOCKET, SO_REUSEADDR, &flag, sizeof flag);
     if (rv < 0) {
-        ERROR("SO_REUSEPORT failed: %s", strerror(errno));
+        ERROR("SO_REUSEADDR failed: %s", strerror(errno));
         comm_free(listener);
         return NULL;
     }
 
+    if (ip_address != NULL) {
+        sl = getipaddr(&listener->address, ip_address);
+        if (sl == 0) {
+            comm_free(listener);
+            return NULL;
+        }
+        if (family == AF_UNSPEC) {
+            family = listener->address.sa.sa_family;
+        } else if (listener->address.sa.sa_family != family) {
+            ERROR("%s is not a %s address.", ip_address, family == AF_INET ? "IPv4" : "IPv6");
+        }
+    }
+    
     if (family == AF_INET) {
         sl = sizeof listener->address.sin;
         listener->address.sin.sin_port = port ? htons(port) : htons(53);
-        if (ip_address != NULL) {
-            if (!inet_pton(AF_INET, ip_address, &listener->address.sin.sin_addr)) {
-                ERROR("Invalid IPv4 address: %s", ip_address);
-                comm_free(listener);
-                return NULL;
-            }
-        }
     } else {
         sl = sizeof listener->address.sin6;
         listener->address.sin6.sin6_port = port ? htons(port) : htons(53);
-        if (ip_address != NULL) {
-            if (!inet_pton(AF_INET6, ip_address, &listener->address.sin.sin_addr)) {
-                ERROR("Invalid IPv6 address: %s", ip_address);
-                comm_free(listener);
-                return NULL;
-            }
-        }
     }
+         
     listener->address.sa.sa_family = family;
 #ifndef NOT_HAVE_SA_LEN
     listener->address.sa.sa_len = sl;

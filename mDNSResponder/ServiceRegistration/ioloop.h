@@ -34,6 +34,7 @@ union addr {
 typedef struct message message_t;
 struct message {
     addr_t src;
+    addr_t local;
     int ifindex;
     size_t length;
     dns_wire_t wire;
