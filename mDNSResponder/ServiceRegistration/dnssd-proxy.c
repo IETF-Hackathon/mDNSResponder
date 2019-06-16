@@ -61,10 +61,10 @@ uint16_t tcp_port;
 uint16_t tls_port;
 char *my_name = NULL;
 #define MAX_ADDRS 10
-char *my_ipv4_addrs[MAX_ADDRS];
-int num_ipv4_addrs = 0;
-char *my_ipv6_addrs[MAX_ADDRS];
-int num_ipv6_addrs = 0;
+char *listen_addrs[MAX_ADDRS];
+int num_listen_addrs = 0;
+char *publish_addrs[MAX_ADDRS];
+int num_publish_addrs = 0;
 char *tls_cacert_filename = NULL;
 char *tls_cert_filename = "/etc/dnssd-proxy/server.crt";
 char *tls_key_filename = "/etc/dnssd-proxy/server.key";
@@ -133,7 +133,7 @@ int64_t dso_transport_idle(void *context, int64_t now, int64_t next_event)
 {
     return next_event;
 }
-
+ 
 void dnssd_query_cancel(io_t *io)
 {
     dnssd_query_t *query = (dnssd_query_t *)io;
@@ -515,19 +515,22 @@ dnssd_hardwired_setup(void)
                 }
             }
             if (local_name != NULL) {
-                // A
-                // ns
-                for (i = 0; i < num_ipv4_addrs; i++) {
+                for (i = 0; i < num_publish_addrs; i++) {
+                    addr_t addr;
                     RESET;
-                    dns_rdata_a_to_wire(&towire, my_ipv4_addrs[i]);
-                    dnssd_hardwired_add(sdt, local_name, local_domain, towire.p - wire.data, wire.data, dns_rrtype_a);
-                }
-
-                for (i = 0; i < num_ipv6_addrs; i++) {
-                    // AAAA
-                    RESET;
-                    dns_rdata_aaaa_to_wire(&towire, my_ipv6_addrs[i]);
-                    dnssd_hardwired_add(sdt, local_name, local_domain, towire.p - wire.data, wire.data, dns_rrtype_aaaa);
+                    memset(&addr, 0, sizeof addr);
+                    getipaddr(&addr, publish_addrs[i]);
+                    if (addr.sa.sa_family == AF_INET) {
+                        // A
+                        // ns
+                        dns_rdata_raw_data_to_wire(&towire, &addr.sin.sin_addr, sizeof addr.sin.sin_addr);
+                        dnssd_hardwired_add(sdt, local_name, local_domain, towire.p - wire.data, wire.data, dns_rrtype_a);
+                    } else {
+                        // AAAA
+                        RESET;
+                        dns_rdata_raw_data_to_wire(&towire, &addr.sin6.sin6_addr, sizeof addr.sin6.sin6_addr);
+                        dnssd_hardwired_add(sdt, local_name, local_domain, towire.p - wire.data, wire.data, dns_rrtype_aaaa);
+                    }
                 }
             }
         }
@@ -563,16 +566,16 @@ dnssd_hardwired_setup(void)
         } else {
             // A
             // ns
-            for (i = 0; i < num_ipv4_addrs; i++) {
+            for (i = 0; i < num_listen_addrs; i++) {
                 RESET;
-                dns_rdata_a_to_wire(&towire, my_ipv4_addrs[i]);
+                dns_rdata_a_to_wire(&towire, listen_addrs[i]);
                 dnssd_hardwired_add(sdt, "", sdt->domain, towire.p - wire.data, wire.data, dns_rrtype_a);
             }
 
-            for (i = 0; i < num_ipv6_addrs; i++) {
+            for (i = 0; i < num_publish_addrs; i++) {
                 // AAAA
                 RESET;
-                dns_rdata_aaaa_to_wire(&towire, my_ipv6_addrs[i]);
+                dns_rdata_aaaa_to_wire(&towire, publish_addrs[i]);
                 dnssd_hardwired_add(sdt, "", sdt->domain, towire.p - wire.data, wire.data, dns_rrtype_aaaa);
             }
         }
@@ -1566,22 +1569,22 @@ static bool my_name_handler(void *context, const char *filename, char **hunks, i
     return config_string_handler(&my_name, filename, hunks[1], lineno, true, false);
 }
 
-static bool my_ipv4_addr_handler(void *context, const char *filename, char **hunks, int num_hunks, int lineno)
+static bool listen_addr_handler(void *context, const char *filename, char **hunks, int num_hunks, int lineno)
 {
-    if (num_ipv4_addrs == MAX_ADDRS) {
-        ERROR("Only %d IPv4 addresses can be configured.", MAX_ADDRS);
+    if (num_listen_addrs == MAX_ADDRS) {
+        ERROR("Only %d IPv4 listen addresses can be configured.", MAX_ADDRS);
         return false;
     }
-    return config_string_handler(&my_ipv4_addrs[num_ipv4_addrs++], filename, hunks[1], lineno, false, false);
+    return config_string_handler(&listen_addrs[num_listen_addrs++], filename, hunks[1], lineno, false, false);
 }
 
-static bool my_ipv6_addr_handler(void *context, const char *filename, char **hunks, int num_hunks, int lineno)
+static bool publish_addr_handler(void *context, const char *filename, char **hunks, int num_hunks, int lineno)
 {
-    if (num_ipv6_addrs == MAX_ADDRS) {
-        ERROR("Only %d IPv4 addresses can be configured.", MAX_ADDRS);
+    if (num_publish_addrs == MAX_ADDRS) {
+        ERROR("Only %d addresses can be published.", MAX_ADDRS);
         return false;
     }
-    return config_string_handler(&my_ipv6_addrs[num_ipv6_addrs++], filename, hunks[1], lineno, false, false);
+    return config_string_handler(&publish_addrs[num_publish_addrs++], filename, hunks[1], lineno, false, false);
 }
 
 static bool tls_key_handler(void *context, const char *filename, char **hunks, int num_hunks, int lineno)
@@ -1609,8 +1612,8 @@ config_file_verb_t dp_verbs[] = {
     { "tls-key",      2, 2, tls_key_handler },      // tls-key <filename>
     { "tls-cert",     2, 2, tls_cert_handler },     // tls-cert <filename>
     { "tls-cacert",   2, 2, tls_cacert_handler },   // tls-cacert <filename>
-    { "my-ipv4-addr", 2, 2, my_ipv4_addr_handler }, // my-ipv4-addr <IPv4 address>
-    { "my-ipv6-addr", 2, 2, my_ipv6_addr_handler }  // my-ipv6-addr <IPv6 address>
+    { "listen-addr",  2, 2, listen_addr_handler },  // listen-addr <IP address>
+    { "publish-addr", 2, 2, publish_addr_handler }  // publish-addr <IP address>
 };
 #define NUMCFVERBS ((sizeof dp_verbs) / sizeof (config_file_verb_t))
 
@@ -1633,7 +1636,7 @@ int
 main(int argc, char **argv)
 {
     int i;
-    comm_t *listener[4 + MAX_ADDRS * 2];
+    comm_t *listener[4 + MAX_ADDRS];
     int num_listeners = 0;
     bool tls_fail = false;
 
@@ -1655,7 +1658,7 @@ main(int argc, char **argv)
     }
     
     // Insist that we have at least one address we're listening on.
-    if (num_ipv4_addrs == 0 && num_ipv6_addrs == 0) {
+    if (num_listen_addrs == 0 && num_publish_addrs == 0) {
         ERROR("Please configure at least one my-ipv4-addr and/or one my-ipv6-addr.");
         return 1;
     }
@@ -1682,66 +1685,77 @@ main(int argc, char **argv)
     // Set up hardwired answers
     dnssd_hardwired_setup();
 
-    if (num_ipv4_addrs > 0) {
-        listener[num_listeners] = setup_listener_socket(AF_INET, IPPROTO_TCP, false,
-                                                        tcp_port, NULL, "IPv4 DNS Push Listener", dns_input, connected, 0);
+    listener[num_listeners] = setup_listener_socket(AF_INET, IPPROTO_TCP, false,
+                                                    tcp_port, NULL, "IPv4 DNS Push Listener", dns_input, connected, 0);
+    if (listener[num_listeners] == NULL) {
+        ERROR("TCPv4 listener: fail.");
+        return 1;
+    }
+    num_listeners++;
+    
+    listener[num_listeners] = setup_listener_socket(AF_INET, IPPROTO_TCP, true,
+                                                    tls_port, NULL, "IPv4 DNS TLS Listener", dns_input, connected, 0);
+    if (listener[num_listeners] == NULL) {
+        ERROR("TLS4 listener: fail.");
+        return 1;
+    }
+    num_listeners++;
+    
+    for (i = 0; i < num_listen_addrs; i++) {
+        listener[num_listeners] = setup_listener_socket(AF_UNSPEC, IPPROTO_UDP, false, udp_port, listen_addrs[i],
+                                                        "DNS UDP Listener", dns_input, 0, 0);
         if (listener[num_listeners] == NULL) {
-            ERROR("TCPv4 listener: fail.");
+            ERROR("UDP listener %s: fail.", listen_addrs[i]);
+            return 1;
+        }
+        num_listeners++;
+    }
+    
+    listener[num_listeners] = setup_listener_socket(AF_INET6, IPPROTO_TCP, false,
+                                                    tcp_port, NULL, "IPv6 DNS Push Listener", dns_input, connected, 0);
+    if (listener[num_listeners] == NULL) {
+        ERROR("TCPv6 listener: fail.");
+        return 1;
+    }
+    num_listeners++;
+    
+    listener[num_listeners] = setup_listener_socket(AF_INET6, IPPROTO_TCP, true,
+                                                    tls_port, NULL, "IPv6 DNS TLS Listener", dns_input, connected, 0);
+    if (listener[num_listeners] == NULL) {
+        ERROR("TLS6 listener: fail.");
+        return 1;
+    }
+    num_listeners++;
+
+    // If we haven't been given any addresses to listen on, listen on an IPv4 address and an IPv6 address.
+    if (num_listen_addrs == 0) {
+        listener[num_listeners] = setup_listener_socket(AF_INET, IPPROTO_UDP, false, udp_port, NULL,
+                                                        "IPv4 DNS UDP Listener", dns_input, 0, 0);
+        if (listener[num_listeners] == NULL) {
+            ERROR("UDP4 listener: fail.");
             return 1;
         }
         num_listeners++;
 
-        listener[num_listeners] = setup_listener_socket(AF_INET, IPPROTO_TCP, true,
-                                                        tls_port, NULL, "IPv4 DNS TLS Listener", dns_input, connected, 0);
+        listener[num_listeners] = setup_listener_socket(AF_INET6, IPPROTO_UDP, false, udp_port, NULL,
+                                                        "IPv6 DNS UDP Listener", dns_input, 0, 0);
         if (listener[num_listeners] == NULL) {
-           ERROR("TLS4 listener: fail.");
-           return 1;
+            ERROR("UDP6 listener: fail.");
+            return 1;
         }
         num_listeners++;
-    
-        for (i = 0; i < num_ipv4_addrs; i++) {
-            listener[num_listeners] = setup_listener_socket(AF_INET, IPPROTO_UDP, false, udp_port, my_ipv4_addrs[i],
-                                                            "IPv4 DNS UDP Listener", dns_input, 0, 0);
-            if (listener[num_listeners] == NULL) {
-                ERROR("UDP4 listener %s: fail.", my_ipv4_addrs[i]);
-                return 1;
-            }
-            num_listeners++;
-        }
     }
-    
-    if (num_ipv6_addrs > 0) {
-        listener[num_listeners] = setup_listener_socket(AF_INET6, IPPROTO_TCP, false,
-                                                        tcp_port, NULL, "IPv6 DNS Push Listener", dns_input, connected, 0);
-        if (listener[num_listeners] == NULL) {
-            ERROR("TCPv6 listener: fail.");
-            return 1;
-        }
-        num_listeners++;
-        
-        listener[num_listeners] = setup_listener_socket(AF_INET6, IPPROTO_TCP, true,
-                                                        tls_port, NULL, "IPv6 DNS TLS Listener", dns_input, connected, 0);
-        if (listener[num_listeners] == NULL) {
-            ERROR("TLS6 listener: fail.");
-            return 1;
-        }
-        num_listeners++;
 
-        for (i = 0; i < num_ipv6_addrs; i++) {
-            listener[num_listeners] = setup_listener_socket(AF_INET6, IPPROTO_UDP, false, udp_port, my_ipv6_addrs[i],
-                                                            "IPv6 DNS UDP Listener", dns_input, 0, 0);
-            if (listener[num_listeners] == NULL) {
-                ERROR("UDP4 listener %s: fail.", my_ipv6_addrs[i]);
-                return 1;
-            }
-            num_listeners++;
-        }
-    }
-    
     for (i = 0; i < num_listeners; i++) {
         INFO("Started %s", listener[i]->name);
     }
 
+    // Start route socket listener...
+    if (!start_route_listener()) {
+        return 1;
+    }
+    INFO("Started routing socket listener.");
+    
     do {
         int something = 0;
         something = ioloop_events(0);
