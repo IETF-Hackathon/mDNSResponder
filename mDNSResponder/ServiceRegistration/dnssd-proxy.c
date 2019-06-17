@@ -41,6 +41,9 @@
 #include <fcntl.h>
 #include <sys/time.h>
 #include <ctype.h>
+#include <sys/types.h>
+#include <ifaddrs.h>
+#include <net/if.h>
 
 #include "dns_sd.h"
 #include "srp.h"
@@ -59,7 +62,7 @@
 uint16_t udp_port;
 uint16_t tcp_port;
 uint16_t tls_port;
-char *my_name = NULL;
+char *my_name = "discoveryproxy.home.arpa.";
 #define MAX_ADDRS 10
 char *listen_addrs[MAX_ADDRS];
 int num_listen_addrs = 0;
@@ -409,6 +412,105 @@ dnssd_hardwired_add(served_domain_t *sdt,
     INFO("hardwired_add: fullname %s name %s type %d rdlen %d", hp->fullname, hp->name, hp->type, hp->rdlen);
 }
 
+void dnssd_hardwired_lbdomains_setup(dns_towire_state_t *towire, dns_wire_t *wire)
+{
+    served_domain_t *ip6 = NULL, *inaddr = NULL;
+    char name[DNS_MAX_NAME_SIZE + 1];
+    struct ifaddrs *addr, *addrs;
+
+#define RESET \
+    memset(towire, 0, sizeof *towire); \
+    towire->message = wire; \
+    towire->p = wire->data; \
+    towire->lim = towire->p + sizeof wire->data
+
+    if (getifaddrs(&addrs) < 0) {
+        INFO("getifaddrs failed: %s", strerror(errno));
+    }
+
+    RESET;
+    dns_full_name_to_wire(NULL, towire, my_name);
+
+    for (addr = addrs; addr; addr = addr->ifa_next) {
+        INFO("%s %x %p %p %d %s", addr->ifa_name,
+             addr->ifa_flags & (IFF_LOOPBACK | IFF_POINTOPOINT),
+             addr->ifa_addr, addr->ifa_netmask,
+             addr->ifa_addr != NULL ? addr->ifa_addr->sa_family : -1,
+             (addr->ifa_addr == NULL
+              ? "<>"
+              : (addr->ifa_addr->sa_family == AF_INET
+                 ? "<ipv4>"
+                 : (addr->ifa_addr->sa_family == AF_INET6 ? "<ipv6>" : "<other>"))));
+        // We don't need to provide discovery for these.
+        if (addr->ifa_flags & (IFF_LOOPBACK | IFF_POINTOPOINT)) {
+            continue;
+        }
+        if (addr->ifa_addr->sa_family == AF_INET && addr->ifa_netmask != NULL) {
+            uint8_t *address = (uint8_t *)&((struct sockaddr_in *)addr->ifa_addr)->sin_addr;
+            uint8_t *mask = (uint8_t *)&((struct sockaddr_in *)addr->ifa_netmask)->sin_addr;
+            char *bp;
+            int space = sizeof name;
+            int i;
+            snprintf(name, space, "lb._dns-sd._udp");
+            bp = name + strlen(name);
+            for (i = 0; i < 4; i++) {
+                if (mask[i] == 0)
+                    break;
+            }
+            i--;
+            for (; i >= 0; i--) {
+                snprintf(bp, (sizeof name) - (bp - name), ".%d", address[i] & mask[i]);
+                bp += strlen(bp);
+            }
+            if (inaddr == NULL) {
+                inaddr = new_served_domain(NULL, "in-addr.arpa.");
+                if (inaddr == NULL) {
+                    ERROR("No space for in-addr.arpa.");
+                    return;
+                }
+            }
+            dnssd_hardwired_add(inaddr, name, inaddr->domain_ld, towire->p - wire->data, wire->data, dns_rrtype_ptr);
+        } else if (addr->ifa_addr->sa_family == AF_INET6 && addr->ifa_netmask != NULL &&
+                   !IN6_IS_ADDR_LINKLOCAL(&((struct sockaddr_in6 *)addr->ifa_addr)->sin6_addr)) {
+            uint8_t *address = (uint8_t *)&((struct sockaddr_in6 *)addr->ifa_addr)->sin6_addr;
+            uint8_t *mask = (uint8_t *)&((struct sockaddr_in6 *)addr->ifa_netmask)->sin6_addr;
+            char *bp;
+            int space = sizeof name;
+            int i, word, ishift, shift;
+            snprintf(name, space, "lb._dns-sd._udp");
+            bp = name + strlen(name);
+            for (i = 16; i >= 0; i--) {
+                word = i; // Four 32-bit words in an IPv6 address
+                for (shift = 0; shift < 8; shift += 4) {
+                    if ((mask[word] & (15 << shift)) != 0)
+                        goto out;
+                }
+            }
+        out:
+            ishift = shift;
+            for (; i  >= 0; i--) {
+                word = i;
+                for (shift = ishift; shift < 8; shift += 4) {
+                    snprintf(bp, (sizeof name) - (bp - name), ".%x",
+                             (address[word] >> shift) & (mask[word] >> shift) & 15);
+                    bp += strlen(bp);
+                }
+                ishift = 0;
+            }
+            if (ip6 == NULL) {
+                ip6 = new_served_domain(NULL, "ip6.arpa.");
+                if (ip6 == NULL) {
+                    ERROR("No space for ip6.arpa.");
+                    return;
+                }
+            }
+            dnssd_hardwired_add(ip6, name, ip6->domain_ld, towire->p - wire->data, wire->data, dns_rrtype_ptr);
+        }
+    }
+    freeifaddrs(addrs);
+#undef RESET
+}
+
 void
 dnssd_hardwired_setup(void)
 {
@@ -580,6 +682,7 @@ dnssd_hardwired_setup(void)
             }
         }
     }
+    dnssd_hardwired_lbdomains_setup(&towire, &wire);
 }
 
 bool
