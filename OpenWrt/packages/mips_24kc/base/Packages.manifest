@@ -1,3 +1,18 @@
+Package: dns-sd
+Version: 5
+Depends: libc, libc, libmbedtls
+Source: package/network/services/dns-sd
+License: Apache-2.0
+Section: net
+Maintainer: Ted Lemon <mellon@fugue.com>
+Architecture: mips_24kc
+Installed-Size: 17602
+Filename: dns-sd_5_mips_24kc.ipk
+Size: 18424
+SHA256sum: 8888be39b82f243252a70822029f09dfe76c6d88621e47acc8ab89548e25d8a5
+Description:  mDNSResponder is the Apple implementation of a DNSSD service discovery agent.  
+ dns-sd is a command line tool for querying the agent when it is running.
+
 Package: dnssd-proxy
 Version: 5
 Depends: libc, libc, libmbedtls, mDNSResponder
