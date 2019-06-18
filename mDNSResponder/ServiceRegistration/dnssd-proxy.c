@@ -442,7 +442,7 @@ void dnssd_hardwired_lbdomains_setup(dns_towire_state_t *towire, dns_wire_t *wir
                  ? "<ipv4>"
                  : (addr->ifa_addr->sa_family == AF_INET6 ? "<ipv6>" : "<other>"))));
         // We don't need to provide discovery for these.
-        if (addr->ifa_flags & (IFF_LOOPBACK | IFF_POINTOPOINT)) {
+        if (addr->ifa_addr == NULL || addr->ifa_flags & (IFF_LOOPBACK | IFF_POINTOPOINT)) {
             continue;
         }
         if (addr->ifa_addr->sa_family == AF_INET && addr->ifa_netmask != NULL) {
