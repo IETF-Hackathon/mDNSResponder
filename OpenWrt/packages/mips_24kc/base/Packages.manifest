@@ -6,10 +6,10 @@ License: Apache-2.0
 Section: net
 Maintainer: Ted Lemon <mellon@fugue.com>
 Architecture: mips_24kc
-Installed-Size: 17602
+Installed-Size: 28814
 Filename: dns-sd_5_mips_24kc.ipk
-Size: 18424
-SHA256sum: 8888be39b82f243252a70822029f09dfe76c6d88621e47acc8ab89548e25d8a5
+Size: 29657
+SHA256sum: ec52232879bdad3a1d83f7df23199453ca3f4641416bd393b15991c3388c8581
 Description:  mDNSResponder is the Apple implementation of a DNSSD service discovery agent.  
  dns-sd is a command line tool for querying the agent when it is running.
 
@@ -21,10 +21,10 @@ License: Apache-2.0
 Section: net
 Maintainer: Ted Lemon <mellon@fugue.com>
 Architecture: mips_24kc
-Installed-Size: 37896
+Installed-Size: 38837
 Filename: dnssd-proxy_5_mips_24kc.ipk
-Size: 38795
-SHA256sum: e8534d65cb6516087d6fa0afe5a50fd3ffa31b789ca228ef8ee9eb1958add131
+Size: 39726
+SHA256sum: 73b1a3fc795718d3e36459b6f7099aec2375ea72c369c23c530086d06e8bd138
 Description:  DNSSD-Proxy is a reference implementation of the IETF DNS Service Discovery Proxy.
  The Discovery Proxy proxies multicast DNS service from one network to another using
  the DNS protocol.   This allows devices on one link to discover services on another

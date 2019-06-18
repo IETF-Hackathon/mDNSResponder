@@ -4,10 +4,10 @@ Depends: libc, libc, libmbedtls
 License: Apache-2.0
 Section: net
 Architecture: mips_24kc
-Installed-Size: 17640
+Installed-Size: 28814
 Filename: dns-sd_5_mips_24kc.ipk
-Size: 18475
-SHA256sum: d964b3d07913c7ee4097aed239fe94b439ea0c5c17d42fdeea4382f609c220a8
+Size: 29657
+SHA256sum: ec52232879bdad3a1d83f7df23199453ca3f4641416bd393b15991c3388c8581
 Description:  mDNSResponder is the Apple implementation of a DNSSD service discovery agent.  
  dns-sd is a command line tool for querying the agent when it is running.
 
