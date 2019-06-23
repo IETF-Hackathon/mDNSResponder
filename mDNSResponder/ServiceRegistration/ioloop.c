@@ -697,6 +697,13 @@ setup_listener_socket(int family, int protocol, bool tls, uint16_t port, const c
         return NULL;
     }
 
+    rv = setsockopt(listener->io.sock, SOL_SOCKET, SO_REUSEPORT, &flag, sizeof flag);
+    if (rv < 0) {
+        ERROR("SO_REUSEPORT failed: %s", strerror(errno));
+        comm_free(listener);
+        return NULL;
+    }
+
     if (ip_address != NULL) {
         sl = getipaddr(&listener->address, ip_address);
         if (sl == 0) {
