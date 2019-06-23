@@ -49,12 +49,19 @@ struct PosixNetworkInterface
 // This is a global because debugf_() needs to be able to check its value
 extern int gMDNSPlatformPosixVerboseLevel;
 
+struct FileWatcher_struct;
+typedef struct FileWatcher_struct FileWatcher;
+struct FileWatcherListener_struct;
+typedef struct FileWatcherListener_struct FileWatcherListener;
+
 struct mDNS_PlatformSupport_struct
 {
     int unicastSocket4;
 #if HAVE_IPV6
     int unicastSocket6;
 #endif
+    FileWatcher *FileWatchers;
+    FileWatcherListener *FileWatcherListener;
 };
 
 // We keep a list of client-supplied event sources in PosixEventSource records
@@ -63,7 +70,7 @@ struct mDNS_PlatformSupport_struct
 #define PosixEventFlag_Read     2
 #define PosixEventFlag_Write    4
     
-typedef void (*mDNSPosixEventCallback)(int fd, void *context);
+typedef void (*mDNSPosixEventCallback)(mDNS *m, int fd, void *context);
 struct PosixEventSource
 {
     struct PosixEventSource *next;
@@ -89,6 +96,20 @@ struct UDPSocket_struct
     mDNSBool randomizePort;
 };
 #endif // DEFINED_UDP_SOCKET_STRUCT
+
+typedef void (*FileWatcherCallback)(mDNS *m, const char *filename, int flags);
+
+struct FileWatcher_struct
+{
+    FileWatcher *next;
+    FileWatcherCallback callback;
+    char *name;
+#ifdef USES_INOTIFY
+    int wd;
+    mDNSs32 wakeupTime;
+    mDNSs32 interval;
+#endif
+};
 
 struct TCPSocket_struct
 {
@@ -118,6 +139,9 @@ struct TCPListener_struct
 #define uDNS_SERVERS_FILE "/etc/resolv.conf"
 extern int ParseDNSServers(mDNS *m, const char *filePath);
 extern mStatus mDNSPlatformPosixRefreshInterfaceList(mDNS *const m);
+extern mDNSs32 FileWatcherIdle(mDNS *m, mDNSs32 nextEvent);
+extern mStatus mDNSPosixWatchFile(mDNS *m, const char *filename, FileWatcherCallback callback);
+extern mStatus FileWatcherInit(mDNS *m);
 // See comment in implementation.
 
 // Call mDNSPosixGetFDSet before calling select(), to update the parameters

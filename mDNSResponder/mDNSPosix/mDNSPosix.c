@@ -52,6 +52,11 @@
 #include <net/if.h>
 #endif // USES_NETLINK
 
+#ifdef USES_INOTIFY
+#include <sys/inotify.h>
+#include <limits.h>
+#endif
+
 #include "mDNSUNP.h"
 #include "GenLinkedList.h"
 #include "dnsproxy.h"
@@ -74,6 +79,14 @@ static sigset_t gEventSignals;                  // Signals which were received w
 
 static PosixNetworkInterface *gRecentInterfaces;
 
+#ifdef USES_INOTIFY
+struct FileWatcherListener_struct {
+    PosixEventSource events;
+    size_t buflen;
+    unsigned char buf[sizeof(struct inotify_event) + NAME_MAX + 1];
+};    
+#endif
+
 // ***************************************************************************
 // Globals (for debugging)
 
@@ -88,7 +101,7 @@ mDNSlocal void requestReadEvents(PosixEventSource *eventSource,
 mDNSlocal mStatus stopReadOrWriteEvents(int fd, mDNSBool freeSource, mDNSBool removeSource, int flags);
 mDNSlocal void requestWriteEvents(PosixEventSource *eventSource,
                                      const char *taskName, mDNSPosixEventCallback callback, void *context);
-mDNSlocal void UDPReadCallback(int fd, void *context);
+mDNSlocal void UDPReadCallback(mDNS *m, int fd, void *context);
 mDNSlocal int SetupIPv4Socket(int fd);
 mDNSlocal int SetupIPv6Socket(int fd);
 
@@ -292,21 +305,23 @@ mDNSexport mStatus mDNSPlatformSendUDP(const mDNS *const m, const void *const ms
     return PosixErrorToStatus(err);
 }
 
-mDNSlocal void TCPReadCallback(int fd, void *context)
+mDNSlocal void TCPReadCallback(mDNS *m, int fd, void *context)
 {
     TCPSocket *sock = context;
     (void)fd;
+    (void)m;
     
     // TLS reading is handled in mDNSPlatformTCPRead().
     sock->callback(sock, sock->context, mDNSfalse, sock->err);
 }
 
-mDNSlocal void tcpConnectCallback(int fd, void *context)
+mDNSlocal void tcpConnectCallback(mDNS *m, int fd, void *context)
 {
     TCPSocket *sock = context;
     mDNSBool c = !sock->connected;
     int result;
     socklen_t len = sizeof result;
+    (void)m;
 
     sock->connected = mDNStrue;
 
@@ -464,11 +479,9 @@ mDNSlocal void SocketDataReady(mDNS *const m, PosixNetworkInterface *intf, int s
                         &senderAddr, senderPort, &destAddr, sock == mDNSNULL ? MulticastDNSPort : sock->port, InterfaceID);
 }
 
-mDNSlocal void UDPReadCallback(int fd, void *context)
+mDNSlocal void UDPReadCallback(mDNS *m, int fd, void *context)
 {
-    extern mDNS mDNSStorage;
-
-    SocketDataReady(&mDNSStorage, mDNSNULL, fd, (UDPSocket *)context);
+    SocketDataReady(m, mDNSNULL, fd, (UDPSocket *)context);
 }
 
 mDNSexport TCPSocket *mDNSPlatformTCPSocket(TCPSocketFlags flags, mDNSAddr_Type addrType, mDNSIPPort * port,
@@ -547,13 +560,14 @@ mDNSexport TCPSocket *mDNSPlatformTCPAccept(TCPSocketFlags flags, int fd)
 }
 
 
-mDNSlocal void tcpListenCallback(int fd, void *context)
+mDNSlocal void tcpListenCallback(mDNS *m, int fd, void *context)
 {
     TCPListener *listener = context;
     TCPSocket *sock;
+    (void)m;
     
     sock = mDNSPosixDoTCPListenCallback(fd, listener->addressType, listener->socketFlags,
-                                 listener->callback, listener->context);
+                                        listener->callback, listener->context);
     if (sock != NULL)
     {
         requestReadEvents(&sock->events, "mDNSPosix::tcpListenCallback", TCPReadCallback, sock);
@@ -1685,7 +1699,7 @@ mDNSlocal mDNSu32       ProcessRoutingNotification(int sd)
 #endif // USES_NETLINK
 
 // Called when data appears on interface change notification socket
-mDNSlocal void InterfaceChangeCallback(int fd, void *context)
+mDNSlocal void InterfaceChangeCallback(mDNS *m, int fd, void *context)
 {
     IfChangeRec     *pChgRec = (IfChangeRec*) context;
     fd_set readFDs;
@@ -1693,6 +1707,7 @@ mDNSlocal void InterfaceChangeCallback(int fd, void *context)
     struct timeval zeroTimeout = { 0, 0 };
 
     (void)fd; // Unused
+    (void)m;
 
     FD_ZERO(&readFDs);
     FD_SET(pChgRec->NotifySD, &readFDs);
@@ -2250,7 +2265,7 @@ mDNSexport void mDNSPosixProcessFDSet(mDNS *const m, fd_set *readfds, fd_set *wr
     {
         if (iSource->readCallback != NULL && FD_ISSET(iSource->fd, readfds))
         {
-            iSource->readCallback(iSource->fd, iSource->readContext);
+            iSource->readCallback(m, iSource->fd, iSource->readContext);
             break;  // in case callback removed elements from gEventSources
         }
         else if (iSource->writeCallback != NULL && FD_ISSET(iSource->fd, writefds))
@@ -2260,7 +2275,7 @@ mDNSexport void mDNSPosixProcessFDSet(mDNS *const m, fd_set *readfds, fd_set *wr
             // We reset this before calling the callback just in case the callback requests another write
             // callback, or deletes the event context from the list.
             iSource->writeCallback = NULL;
-            writeCallback(iSource->fd, iSource->writeContext);
+            writeCallback(m, iSource->fd, iSource->writeContext);
             break;  // in case callback removed elements from gEventSources
         }
     }
@@ -2471,5 +2486,138 @@ mStatus mDNSPosixRunEventLoopOnce(mDNS *m, const struct timeval *pTimeout,
     sigemptyset(&gEventSignals);
     (void) sigprocmask(SIG_UNBLOCK, &gEventSignalSet, (sigset_t*) NULL);
 
+    return mStatus_NoError;
+}
+
+#ifdef USES_INOTIFY
+mDNSs32 FileWatcherIdle(mDNS *m, mDNSs32 nextEvent)
+{
+    FileWatcher *fw;
+
+    for (fw = m->p->FileWatchers; fw; fw = fw->next) {
+        if (fw->wd == -1) {
+            if (fw->wakeupTime == 0 || m->timenow - fw->wakeupTime > 0) {
+                fw->wd = inotify_add_watch(m->p->FileWatcherListener->events.fd, fw->name, IN_CLOSE_WRITE | IN_CREATE | IN_MODIFY | IN_DELETE);
+                if (fw->wd < 0)
+                {
+                    LogMsg("inotify_add_watch: %s", strerror(errno));
+                    // Wait a bit longer next time, but never longer than a minute.
+                    if (fw->interval < 60 * mDNSPlatformOneSecond)
+                    {
+                        fw->interval *= 2; // Wait one second for a change.
+                    }
+                    fw->wakeupTime = m->timenow + fw->interval;
+                }
+                else
+                {
+                    fw->wakeupTime = 0;
+                    fw->interval = 0;
+                }
+            }
+            // If the wakeup time for this file watcher is earlier than the current next event time,
+            // use the wakeup time as the next event time.
+            if (fw->wakeupTime != 0 && nextEvent - fw->wakeupTime > 0) {
+                nextEvent = fw->wakeupTime;
+            }
+        }
+    }
+    return nextEvent;
+}
+
+void
+inotifyReadCallback(mDNS *m, int fd, void *context)
+{
+    ssize_t len;
+    struct inotify_event *event;
+    FileWatcher *fw;
+    size_t evlen, next_event = 0;
+    FileWatcherListener *l = context;
+
+    len = read(fd, &l->buf[l->buflen], (sizeof l->buf) - l->buflen);
+    if (len < 0) {
+        LogMsg("Unable to read inotify event: %s", strerror(errno));
+    }
+    l->buflen += len;
+
+    do {
+        // Make sure we have a full event structure.
+        if (len - next_event < sizeof (struct inotify_event)) {
+            break;
+        }
+
+        // Get pointer to event structure; inotify interface guarantees alignment.
+        event = (struct inotify_event *)&l->buf[next_event];
+
+        // Make sure we have the name (if any) as well.
+        evlen = event->len + sizeof (struct inotify_event);
+        if (l->buflen - next_event < evlen) {
+            break;
+        }
+
+        // We have a full event, so process it.
+        for (fw = m->p->FileWatchers; fw; fw = fw->next) {
+            if (fw->wd == event->wd) {
+                fw->callback(m, fw->name, 0);
+            }
+        }
+        next_event += evlen;
+    } while (1); // Exit conditions handled above.
+
+    // It's possible that we may have read a partial event.   In this case, we
+    // copy it to the beginning of the buffer, since this would have happened
+    // because there wasn't space for the full event.   The remaining data should
+    // be available immediately, but to account for bad design, we go back out
+    // through the event loop and allow the next read to be triggered that way
+    // rather than looping here.   The check for next_event != 0 is to make sure
+    // that we didn't get a partial read initially.  This should really never
+    // happen, but if it does, we account for it.
+    if (next_event != 0 && next_event < l->buflen) {
+        memmove(l->buf, &l->buf[next_event], l->buflen - next_event);
+        l->buflen -= evlen;
+    }
+}
+
+mStatus FileWatcherInit(mDNS *m)
+{
+    FileWatcherListener *l = callocL("FileWatcherListener", sizeof *l);
+    if (l == mDNSNULL) {
+        return mStatus_NoMemoryErr;
+    }
+    m->p->FileWatcherListener = l;
+    l->events.fd = inotify_init1(IN_NONBLOCK | IN_CLOEXEC);
+
+    if (l->events.fd < 0)
+    {
+        LogMsg("inotify_init1: %s", strerror(errno));
+        return mStatus_UnknownErr;
+    }
+    requestReadEvents(&l->events, "inotify Reader", inotifyReadCallback, l);
+    return mStatus_NoError;
+}
+#endif
+
+mStatus
+mDNSPosixWatchFile(mDNS *m, const char *filename, FileWatcherCallback callback)
+{
+    FileWatcher *fw;
+
+    fw = callocL("FileWatcher", (sizeof *fw) + strlen(filename) + 1);
+    if (fw == NULL) {
+        return mStatus_NoMemoryErr;
+    }
+    fw->name = (char *)(fw + 1);
+    strcpy(fw->name, filename);
+    
+#ifdef USES_INOTIFY
+    fw->wd = -1;
+    fw->wakeupTime = 0;
+    FileWatcherIdle(m, 0);
+    fw->callback = callback;
+    fw->next = m->p->FileWatchers;
+    m->p->FileWatchers= fw;
+#else
+#ifdef USES_KQUEUE
+#endif // USES_KQUEUE
+#endif // USES_INOTIFY
     return mStatus_NoError;
 }
