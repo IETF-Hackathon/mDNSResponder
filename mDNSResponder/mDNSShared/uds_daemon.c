@@ -4699,12 +4699,13 @@ mDNSlocal mStatus handle_client_request(request_state *req)
 // The lightweight operations are the ones that don't need a dedicated request_state structure allocated for them
 #define LightweightOp(X) (RecordOrientedOp(X) || (X) == cancel_request)
 
-mDNSlocal void request_callback(int fd, void *info)
+mDNSlocal void request_callback(mDNS *m, int fd, void *info)
 {
     mStatus err = 0;
     request_state *req = info;
     mDNSs32 min_size = sizeof(DNSServiceFlags);
     (void)fd; // Unused
+	(void)m;
 
     for (;;)
     {
@@ -4777,7 +4778,7 @@ mDNSlocal void request_callback(int fd, void *info)
             newreq->msgbuf  = req->msgbuf;
             newreq->msgptr  = req->msgptr;
             newreq->msgend  = req->msgend;
-            newreq->request_id = mDNSStorage.next_request_id++; 
+            newreq->request_id = m->next_request_id++; 
             // if the parent request is a delegate connection, copy the
             // relevant bits
             if (req->validUUID)
@@ -4805,7 +4806,7 @@ mDNSlocal void request_callback(int fd, void *info)
 
         // If we're shutting down, don't allow new client requests
         // We do allow "cancel" and "getproperty" during shutdown
-        if (mDNSStorage.ShutdownTime && req->hdr.op != cancel_request && req->hdr.op != getproperty_request)
+        if (m->ShutdownTime && req->hdr.op != cancel_request && req->hdr.op != getproperty_request)
             err = mStatus_ServiceNotRunning;
         else
             err = handle_client_request(req);
@@ -4841,7 +4842,7 @@ mDNSlocal void request_callback(int fd, void *info)
     }
 }
 
-mDNSlocal void connect_callback(int fd, void *info)
+mDNSlocal void connect_callback(mDNS *m, int fd, void *info)
 {
     dnssd_sockaddr_t cliaddr;
     dnssd_socklen_t len = (dnssd_socklen_t) sizeof(cliaddr);
@@ -4851,6 +4852,7 @@ mDNSlocal void connect_callback(int fd, void *info)
 #endif
 
     (void)info; // Unused
+	(void)m;
 
     if (!dnssd_SocketValid(sd))
     {
@@ -4881,7 +4883,7 @@ mDNSlocal void connect_callback(int fd, void *info)
         request->ts    = t_morecoming;
         request->sd    = sd;
         request->errsd = sd;
-        request->request_id = mDNSStorage.next_request_id++;
+        request->request_id = m->next_request_id++;
         set_peer_pid(request);
 #if APPLE_OSX_mDNSResponder
         struct xucred x;
