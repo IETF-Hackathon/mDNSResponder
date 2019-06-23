@@ -99,6 +99,14 @@ static void Reconfigure(mDNS *m)
     mDNS_ConfigChanged(m);
 }
 
+void
+mDNSPosixResolvConfChanged(mDNS *m, const char *filename, int flags)
+{
+    (void)flags;
+    LogMsg("resolv.conf file changed (%s)", filename);
+    Reconfigure(m);
+}
+
 // Do appropriate things at startup with command line arguments. Calls exit() if unhappy.
 mDNSlocal void ParseCmdLinArgs(int argc, char **argv)
 {
@@ -149,6 +157,7 @@ mDNSlocal mStatus MainLoop(mDNS *m) // Loop until we quit.
         {
             mDNSs32 nextTimerEvent = mDNS_Execute(m);
             nextTimerEvent = udsserver_idle(nextTimerEvent);
+            nextTimerEvent = FileWatcherIdle(m, nextTimerEvent);
             ticks = nextTimerEvent - mDNS_TimeNow(m);
             if (ticks < 1) ticks = 1;
         }
@@ -183,7 +192,11 @@ int main(int argc, char **argv)
     if (mStatus_NoError == err)
         err = udsserver_init(mDNSNULL, 0);
 
-    Reconfigure(&mDNSStorage);
+	if (mStatus_NoError == err) {
+        err = FileWatcherInit(&mDNSStorage);
+        Reconfigure(&mDNSStorage);
+        mDNSPosixWatchFile(&mDNSStorage, uDNS_SERVERS_FILE, mDNSPosixResolvConfChanged);
+	}
 
     // Now that we're finished with anything privileged, switch over to running as "nobody"
     if (mStatus_NoError == err)
@@ -263,3 +276,12 @@ mDNSexport const char mDNSResponderVersionString_SCCS[] = "@(#) mDNSResponder (E
 #else
 mDNSexport const char mDNSResponderVersionString_SCCS[] = "@(#) mDNSResponder (Engineering Build) (" __DATE__ " " __TIME__ ")";
 #endif
+
+// Local Variables:
+// mode: C
+// tab-width: 4
+// c-file-style: "bsd"
+// c-basic-offset: 4
+// fill-column: 108
+// indent-tabs-mode: nil
+// End:
