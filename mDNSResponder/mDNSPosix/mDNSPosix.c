@@ -2490,23 +2490,167 @@ mStatus mDNSPosixRunEventLoopOnce(mDNS *m, const struct timeval *pTimeout,
 }
 
 #ifdef USES_INOTIFY
+int FileWatcherWatchContainingDirectory(FileWatcherListener *l, const char *name, mDNSBool *dirExists)
+{
+    char *s;
+    char buf[PATH_MAX];
+    int ret;
+
+    // Should never happen, but if it does don't crash.
+    if (strlen(buf) >= PATH_MAX) {
+        LogMsg("!!!FileWatcherWatchContainingDirectory called with too-long filename!!!");
+        return -1;
+    }
+    strcpy(buf, name);
+    
+    // This is a loop because it's possible that the directory containing the file doesn't exist;
+    // in that case, we need to watch the parent directory; possibly all the way up to the root.
+    do {
+        s = strrchr(buf, '/');
+        // If it's a relative pathname with no slashes, it's a file in the current directory,
+        // so watch the current directory.
+        if (s == NULL)
+        {
+            strcpy(buf, ".");
+            s = buf;
+        }
+        else
+        {
+            if (s != buf) *s = '\0';
+            else buf[1] = '\0';
+        }
+        ret = inotify_add_watch(l->events.fd, buf,
+                                IN_MODIFY | IN_DELETE_SELF | IN_MOVE_SELF | IN_CREATE | IN_DELETE | IN_MOVED_FROM | IN_MOVED_TO);
+        if (ret < 0)
+        {
+            LogMsg("Container directory for %s doesn't exist or can't be watched: %s", strerror(errno));
+            if (dirExists) *dirExists = mDNSfalse;
+        }
+        else debugf("watching %s", buf);
+    } while (ret < 0 && s != buf);
+    return ret;
+}
+
+// The Linux inotify API doesn't let us watch a file that doesn't exist.  Because of this,
+// we need to watch the directory containing the file, and if there is a link, the
+// directory containing the link.   If the file appears to exist, the callback is called.
+void FileWatcherSetup(mDNS *m, FileWatcherListener *l, FileWatcher *fw)
+{
+    char buf[PATH_MAX];
+    mDNSBool watchFile = mDNStrue;     // True if the directory containing the file exists; false otherwise.
+    mDNSBool watchLink = mDNStrue;     // True if the directory containing the link exists; false otherwise; not used if no link.
+    ssize_t len;
+    
+    // Get rid of any existing watches.
+    if (fw->containingDirectory >= 0) {
+        inotify_rm_watch(l->events.fd, fw->containingDirectory);
+        fw->containingDirectory = -1;
+    }
+    if (fw->linkContainingDirectory >= 0) {
+        inotify_rm_watch(l->events.fd, fw->linkContainingDirectory);
+        fw->linkContainingDirectory = -1;
+    }
+    if (fw->file >= 0) {
+        inotify_rm_watch(l->events.fd, fw->file);
+        fw->file = -1;
+    }
+    if (fw->link >= 0) {
+        inotify_rm_watch(l->events.fd, fw->link);
+        fw->link = -1;
+    }
+    fw->needRetry = mDNSfalse;
+
+    // First watch the directory containing the file.   Because we watch that first, in
+    // principle it should not be possible for the link to change without triggering a
+    // refresh: even if the link is deleted, we should get a change event on the directory
+    // containing it.
+    strcpy(buf, fw->name);
+    fw->containingDirectory = FileWatcherWatchContainingDirectory(l, buf, &watchFile);
+
+    // watchFile is true if the containing directory exists and we succeeded in watching it.
+    if (watchFile)
+    {
+        // Watch the file under its given name (it might be a link).
+        fw->file = inotify_add_watch(l->events.fd, fw->name,
+                                     IN_MODIFY | IN_DELETE_SELF | IN_MOVE_SELF | IN_ATTRIB | IN_DONT_FOLLOW);
+        if (fw->file < 0) {
+            LogMsg("File %s doesn't exist or can't be watched: %s", fw->name, strerror(errno));
+            watchFile = mDNSfalse;
+        } else {
+            debugf("watching file or link %s", fw->name);
+            
+            // Now see if it's a link.
+            if ((len = readlink(fw->name, buf, sizeof buf)) > 0)
+            {
+                if ((size_t)len < sizeof buf)
+                {
+                    buf[len] = 0;
+                    
+                    // If readlink succeeded, we need to watch the link (we already are), the file the link
+                    // points to, and the directory containing that file.  We have to watch the directory first
+                    // in case the linked file vanishes while we are setting this up.
+                    fw->linkContainingDirectory = FileWatcherWatchContainingDirectory(l, buf, &watchLink);
+                    if (watchLink) {
+                        fw->link = inotify_add_watch(l->events.fd, buf,
+                                                     IN_MODIFY | IN_DELETE_SELF | IN_MOVE_SELF | IN_ATTRIB);
+                        if (fw->link >= 0) {
+                            debugf("watching link %s", fw->name);
+                        }
+                    } else {
+                        if (fw->linkContainingDirectory < 0) fw->needRetry = mDNStrue;
+                        watchFile = mDNSfalse;
+                    }
+                    if (fw->link < 0) {
+                        LogMsg("File %s (linked from %s) doesn't exist or can't be watched: %s", buf, fw->name, strerror(errno));
+                    }
+                }
+                else
+                {   // Should never happen.
+                    LogMsg("readlink returned a too-long filename.");
+                    fw->needRetry = mDNStrue;
+                }
+            }
+        }
+    } else {
+        // We get here if watchFile is false.   If watchFile is false and we aren't watching the
+        // directory containing the file, we need a retry.
+        if (fw->containingDirectory < 0) fw->needRetry = mDNStrue;
+    }
+
+    // If we succeeded in setting up a watcher, reset the retry interval
+    if (!fw->needRetry) fw->interval = mDNSPlatformOneSecond;
+
+    // We return true if it's worth trying to read the file.
+    if (watchFile)
+    {
+        fw->callback(m, fw->name, 0);
+    }
+}
+
+// FileWatcher Idle Loop.   Scan the list of watched files and see if there is a retry event
+// coming up sooner than nextEvent.   This function does double duty in that the first time
+// a file is watched, the data structure is set up and needRetry is set, so that FileWatcherIdle
+// will actually watch it the next time it's called, which should be the next time through the
+// Posix event loop.
 mDNSs32 FileWatcherIdle(mDNS *m, mDNSs32 nextEvent)
 {
     FileWatcher *fw;
 
-    for (fw = m->p->FileWatchers; fw; fw = fw->next) {
-        if (fw->wd == -1) {
-            if (fw->wakeupTime == 0 || m->timenow - fw->wakeupTime > 0) {
-                fw->wd = inotify_add_watch(m->p->FileWatcherListener->events.fd, fw->name, IN_CLOSE_WRITE | IN_CREATE | IN_MODIFY | IN_DELETE);
-                if (fw->wd < 0)
+    mDNS_Lock(m);
+    for (fw = m->p->FileWatchers; fw; fw = fw->next)
+    {
+        if (fw->needRetry) {
+            if (fw->wakeupTime == 0 || m->timenow - fw->wakeupTime > 0)
+            {
+                FileWatcherSetup(m, m->p->FileWatcherListener, fw);
+                if (fw->needRetry)
                 {
-                    LogMsg("inotify_add_watch: %s", strerror(errno));
+                    fw->wakeupTime = m->timenow + fw->interval;
                     // Wait a bit longer next time, but never longer than a minute.
                     if (fw->interval < 60 * mDNSPlatformOneSecond)
                     {
                         fw->interval *= 2; // Wait one second for a change.
                     }
-                    fw->wakeupTime = m->timenow + fw->interval;
                 }
                 else
                 {
@@ -2516,11 +2660,13 @@ mDNSs32 FileWatcherIdle(mDNS *m, mDNSs32 nextEvent)
             }
             // If the wakeup time for this file watcher is earlier than the current next event time,
             // use the wakeup time as the next event time.
-            if (fw->wakeupTime != 0 && nextEvent - fw->wakeupTime > 0) {
+            if (fw->wakeupTime != 0 && nextEvent - fw->wakeupTime > 0)
+            {
                 nextEvent = fw->wakeupTime;
             }
         }
     }
+    mDNS_Unlock(m);
     return nextEvent;
 }
 
@@ -2534,14 +2680,16 @@ inotifyReadCallback(mDNS *m, int fd, void *context)
     FileWatcherListener *l = context;
 
     len = read(fd, &l->buf[l->buflen], (sizeof l->buf) - l->buflen);
-    if (len < 0) {
+    if (len < 0)
+    {
         LogMsg("Unable to read inotify event: %s", strerror(errno));
     }
     l->buflen += len;
 
-    do {
-        // Make sure we have a full event structure.
-        if (len - next_event < sizeof (struct inotify_event)) {
+    do
+    {   // Make sure we have a full event structure.
+        if (l->buflen - next_event < sizeof (struct inotify_event))
+        {
             break;
         }
 
@@ -2550,14 +2698,27 @@ inotifyReadCallback(mDNS *m, int fd, void *context)
 
         // Make sure we have the name (if any) as well.
         evlen = event->len + sizeof (struct inotify_event);
-        if (l->buflen - next_event < evlen) {
+        if (l->buflen - next_event < evlen)
+        {
             break;
         }
 
         // We have a full event, so process it.
-        for (fw = m->p->FileWatchers; fw; fw = fw->next) {
-            if (fw->wd == event->wd) {
-                fw->callback(m, fw->name, 0);
+        for (fw = m->p->FileWatchers; fw; fw = fw->next)
+        {
+            if (event->wd == fw->file || event->wd == fw->link ||
+                event->wd == fw->containingDirectory || event->wd == fw->linkContainingDirectory)
+            {
+                // Whenever we get some event on a particular file, re-do the whole
+                // file watch setup for that file.   The reason is that we need to
+                // watch not only the file, but the directory containing it (if the
+                // file is not present).   The file may also be a symlink; if it is,
+                // then we need to watch the symlink and the directory containing
+                // it.   We can't assume that it will always be a certain way, so
+                // by re-watching every time an event happens, we ensure that we
+                // don't lose track.   FileWatcherSetup calls the callback if there seems
+                // to be a file to read.
+                FileWatcherSetup(m, m->p->FileWatcherListener, fw);
             }
         }
         next_event += evlen;
@@ -2571,9 +2732,14 @@ inotifyReadCallback(mDNS *m, int fd, void *context)
     // rather than looping here.   The check for next_event != 0 is to make sure
     // that we didn't get a partial read initially.  This should really never
     // happen, but if it does, we account for it.
-    if (next_event != 0 && next_event < l->buflen) {
+    if (next_event != 0 && next_event < l->buflen)
+    {
         memmove(l->buf, &l->buf[next_event], l->buflen - next_event);
-        l->buflen -= evlen;
+        l->buflen -= next_event;
+    }
+    else
+    {
+        l->buflen = 0;
     }
 }
 
@@ -2609,9 +2775,13 @@ mDNSPosixWatchFile(mDNS *m, const char *filename, FileWatcherCallback callback)
     strcpy(fw->name, filename);
     
 #ifdef USES_INOTIFY
-    fw->wd = -1;
+    fw->file = -1;
+    fw->link = -1;
+    fw->containingDirectory = -1;
+    fw->linkContainingDirectory = -1;
     fw->wakeupTime = 0;
-    FileWatcherIdle(m, 0);
+    fw->needRetry = mDNStrue; // This triggers the initial watch of the file and containing directory.
+    fw->interval = mDNSPlatformOneSecond;
     fw->callback = callback;
     fw->next = m->p->FileWatchers;
     m->p->FileWatchers= fw;

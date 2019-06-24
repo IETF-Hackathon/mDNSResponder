@@ -105,9 +105,13 @@ struct FileWatcher_struct
     FileWatcherCallback callback;
     char *name;
 #ifdef USES_INOTIFY
-    int wd;
+    int file;
+    int link;
+    int containingDirectory;
+    int linkContainingDirectory;
     mDNSs32 wakeupTime;
     mDNSs32 interval;
+    mDNSBool needRetry;
 #endif
 };
 
