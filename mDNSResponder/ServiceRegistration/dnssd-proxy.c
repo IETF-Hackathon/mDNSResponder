@@ -766,7 +766,7 @@ dp_query_send_dns_response(dnssd_query_t *query)
         bitfield = bitfield & mask;
     } else {
         // Response is recursive and not authoritative.
-	mask = ~dns_flags_aa;
+        mask = ~dns_flags_aa;
         bitfield = bitfield | dns_flags_ra | tc;
         bitfield = bitfield & mask;
     }
@@ -950,15 +950,20 @@ dns_query_callback(DNSServiceRef sdRef, DNSServiceFlags flags, uint32_t interfac
                 } else {
                     dns_rcode_set(query->response, dns_rcode_servfail);
                     dp_query_send_dns_response(query);
-		    return;
-	        }
+                    return;
+                }
             }
         } else {
             query->response->ancount = htons(ntohs(query->response->ancount) + 1);
         }
         // If there isn't more coming, send the response now
         if (!(flags & kDNSServiceFlagsMoreComing) || query->towire.truncated) {
-            dp_query_send_dns_response(query);
+            // When we get a CNAME response, we may not get the record it points to with the MoreComing
+            // flag set, so don't respond yet.
+            if (query->type != dns_rrtype_cname && rrtype == dns_rrtype_cname) {
+            } else {
+                dp_query_send_dns_response(query);
+            }
         }
     } else if (errorCode == kDNSServiceErr_NoSuchRecord) {
         // If we get "no such record," we can't really do much except return the answer.
