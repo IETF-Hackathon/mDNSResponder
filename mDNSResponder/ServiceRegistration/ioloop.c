@@ -337,10 +337,14 @@ ioloop_events(int64_t timeout_when)
         ts.tv_sec = 0;
         ts.tv_nsec = 0;
         if (rv < 0) {
-            ERROR("kevent poll: %s", strerror(errno));
-            exit(1);
+            if (errno == EINTR) {
+                rv = 0;
+            } else {
+                ERROR("kevent poll: %s", strerror(errno));
+                exit(1);
+            }
         }
-        for (i = 0; i < nev; i++) {
+        for (i = 0; i < rv; i++) {
             io = evs[i].udata;
             if (evs[i].filter == EVFILT_WRITE) {
                 io->write_callback(io);
