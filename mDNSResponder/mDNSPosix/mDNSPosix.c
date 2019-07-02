@@ -881,13 +881,16 @@ mDNSexport void FreeEtcHosts(mDNS *const m, AuthRecord *const rr, mStatus result
 mDNSexport mDNSBool mDNSPlatformSetDNSConfig(mDNSBool setservers, mDNSBool setsearch, domainname *const fqdn, DNameListElem **RegDomains,
     DNameListElem **BrowseDomains, mDNSBool ackConfig)
 {
-    (void) setservers;
+    extern mDNS mDNSStorage;
     (void) setsearch;
     (void) ackConfig;
 
     if (fqdn         ) fqdn->c[0]      = 0;
     if (RegDomains   ) *RegDomains     = NULL;
     if (BrowseDomains) *BrowseDomains  = NULL;
+
+    if (setservers && ParseDNSServers(&mDNSStorage, uDNS_SERVERS_FILE) < 0)
+        LogMsg("Unable to parse DNS server list. Unicast DNS-SD unavailable");
 
     return mDNStrue;
 }
@@ -932,25 +935,30 @@ mDNSlocal void GetUserSpecifiedFriendlyComputerName(domainlabel *const namelabel
 mDNSexport int ParseDNSServers(mDNS *m, const char *filePath)
 {
     char line[256];
-    char nameserver[16];
+    char nameserver[64];
     char keyword[11];
     int numOfServers = 0;
     FILE *fp = fopen(filePath, "r");
+    mDNSAddr DNSAddr;
     if (fp == NULL) return -1;
     while (fgets(line,sizeof(line),fp))
     {
         struct in_addr ina;
         line[255]='\0';     // just to be safe
-        if (sscanf(line,"%10s %15s", keyword, nameserver) != 2) continue;   // it will skip whitespaces
-        if (strncasecmp(keyword,"nameserver",10)) continue;
-        if (inet_aton(nameserver, (struct in_addr *)&ina) != 0)
+        if (sscanf(line, "%10s %63s", keyword, nameserver) != 2) continue;   // it will skip whitespaces
+        if (strncasecmp(keyword, "nameserver",10)) continue;
+        if (inet_pton(AF_INET, nameserver, &DNSAddr.ip.v4) != 0)
         {
-            mDNSAddr DNSAddr;
             DNSAddr.type = mDNSAddrType_IPv4;
-            DNSAddr.ip.v4.NotAnInteger = ina.s_addr;
-            mDNS_AddDNSServer(m, NULL, mDNSInterface_Any, 0, &DNSAddr, UnicastDNSPort, kScopeNone, 0, mDNSfalse, mDNSfalse, 0, mDNStrue, mDNStrue, mDNSfalse);
-            numOfServers++;
         }
+        else if (inet_pton(AF_INET6, nameserver, &DNSAddr.ip.v6) != 0)
+        {
+            DNSAddr.type = mDNSAddrType_IPv6;
+        }
+        else continue;
+        mDNS_AddDNSServer(m, NULL, mDNSInterface_Any, 0, &DNSAddr, UnicastDNSPort,
+                          kScopeNone, 0, mDNSfalse, mDNSfalse, 0, mDNStrue, mDNStrue, mDNSfalse);
+        numOfServers++;
     }
     fclose(fp);
     return (numOfServers > 0) ? 0 : -1;
@@ -2636,7 +2644,6 @@ mDNSs32 FileWatcherIdle(mDNS *m, mDNSs32 nextEvent)
 {
     FileWatcher *fw;
 
-    mDNS_Lock(m);
     for (fw = m->p->FileWatchers; fw; fw = fw->next)
     {
         if (fw->needRetry) {
@@ -2666,7 +2673,6 @@ mDNSs32 FileWatcherIdle(mDNS *m, mDNSs32 nextEvent)
             }
         }
     }
-    mDNS_Unlock(m);
     return nextEvent;
 }
 

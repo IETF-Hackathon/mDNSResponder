@@ -49,6 +49,7 @@ extern int daemon(int, int);
 #include "mDNSUNP.h"        // For daemon()
 #include "uds_daemon.h"
 #include "PlatformCommon.h"
+#include "uDNS.h"
 
 #define CONFIG_FILE "/etc/mdnsd.conf"
 static domainname DynDNSZone;                // Default wide-area zone for service registration
@@ -90,8 +91,7 @@ static void Reconfigure(mDNS *m)
     mDNSAddr DynDNSIP;
     const mDNSAddr dummy = { mDNSAddrType_IPv4, { { { 1, 1, 1, 1 } } } };;
     mDNS_SetPrimaryInterfaceInfo(m, NULL, NULL, NULL);
-    if (ParseDNSServers(m, uDNS_SERVERS_FILE) < 0)
-        LogMsg("Unable to parse DNS server list. Unicast DNS-SD unavailable");
+    uDNS_SetupDNSConfig(m);
     ReadDDNSSettingsFromConfFile(m, CONFIG_FILE, &DynDNSHostname, &DynDNSZone, NULL);
     mDNSPlatformSourceAddrForDest(&DynDNSIP, &dummy);
     if (DynDNSHostname.c[0]) mDNS_AddDynDNSHostName(m, &DynDNSHostname, NULL, NULL);
@@ -104,7 +104,8 @@ mDNSPosixResolvConfChanged(mDNS *m, const char *filename, int flags)
 {
     (void)flags;
     LogMsg("resolv.conf file changed (%s)", filename);
-    Reconfigure(m);
+    uDNS_SetupDNSConfig(m);
+    mDNS_ConfigChanged(m);
 }
 
 // Do appropriate things at startup with command line arguments. Calls exit() if unhappy.
