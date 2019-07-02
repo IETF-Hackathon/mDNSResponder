@@ -238,6 +238,7 @@ mDNSexport mStatus mDNSPlatformSendUDP(const mDNS *const m, const void *const ms
                 memset(&from, 0, sizeof from);
                 if (sa->sa_family == AF_INET)
                 {
+                    ((struct sockaddr_in *)&from)->sin_family = AF_INET;
                     fromlen = sizeof (struct sockaddr_in);
                     pport = &((struct sockaddr_in *)&from)->sin_port;
                     err = SetupIPv4Socket(sock);
@@ -245,6 +246,7 @@ mDNSexport mStatus mDNSPlatformSendUDP(const mDNS *const m, const void *const ms
                 }
                 else
                 {
+                    ((struct sockaddr_in6 *)&from)->sin6_family = AF_INET6;
                     fromlen = sizeof (struct sockaddr_in6);
                     pport = &((struct sockaddr_in6 *)&from)->sin6_port;
                     err = SetupIPv6Socket(sock);
@@ -265,7 +267,7 @@ mDNSexport mStatus mDNSPlatformSendUDP(const mDNS *const m, const void *const ms
                     }
                     if (errno != EADDRINUSE)
                     {
-                        LogMsg("Can't get randomized port: %m", strerror(errno));
+                        LogMsg("Can't get randomized port: %s", strerror(errno));
                         return PosixErrorToStatus(errno);
                     }
                 }
@@ -943,7 +945,6 @@ mDNSexport int ParseDNSServers(mDNS *m, const char *filePath)
     if (fp == NULL) return -1;
     while (fgets(line,sizeof(line),fp))
     {
-        struct in_addr ina;
         line[255]='\0';     // just to be safe
         if (sscanf(line, "%10s %63s", keyword, nameserver) != 2) continue;   // it will skip whitespaces
         if (strncasecmp(keyword, "nameserver",10)) continue;
