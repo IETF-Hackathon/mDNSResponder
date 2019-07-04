@@ -1794,7 +1794,7 @@ main(int argc, char **argv)
     dnssd_hardwired_setup();
 
     listener[num_listeners] = setup_listener_socket(AF_INET, IPPROTO_TCP, false,
-                                                    tcp_port, NULL, "IPv4 DNS Push Listener", dns_input, connected, 0);
+                                                    tcp_port, NULL, NULL, "IPv4 DNS Push Listener", dns_input, connected, 0);
     if (listener[num_listeners] == NULL) {
         ERROR("TCPv4 listener: fail.");
         return 1;
@@ -1802,7 +1802,7 @@ main(int argc, char **argv)
     num_listeners++;
     
     listener[num_listeners] = setup_listener_socket(AF_INET, IPPROTO_TCP, true,
-                                                    tls_port, NULL, "IPv4 DNS TLS Listener", dns_input, connected, 0);
+                                                    tls_port, NULL, NULL, "IPv4 DNS TLS Listener", dns_input, connected, 0);
     if (listener[num_listeners] == NULL) {
         ERROR("TLS4 listener: fail.");
         return 1;
@@ -1810,7 +1810,7 @@ main(int argc, char **argv)
     num_listeners++;
     
     for (i = 0; i < num_listen_addrs; i++) {
-        listener[num_listeners] = setup_listener_socket(AF_UNSPEC, IPPROTO_UDP, false, udp_port, listen_addrs[i],
+        listener[num_listeners] = setup_listener_socket(AF_UNSPEC, IPPROTO_UDP, false, udp_port, listen_addrs[i], NULL,
                                                         "DNS UDP Listener", dns_input, 0, 0);
         if (listener[num_listeners] == NULL) {
             ERROR("UDP listener %s: fail.", listen_addrs[i]);
@@ -1820,7 +1820,7 @@ main(int argc, char **argv)
     }
     
     listener[num_listeners] = setup_listener_socket(AF_INET6, IPPROTO_TCP, false,
-                                                    tcp_port, NULL, "IPv6 DNS Push Listener", dns_input, connected, 0);
+                                                    tcp_port, NULL, NULL, "IPv6 DNS Push Listener", dns_input, connected, 0);
     if (listener[num_listeners] == NULL) {
         ERROR("TCPv6 listener: fail.");
         return 1;
@@ -1828,7 +1828,7 @@ main(int argc, char **argv)
     num_listeners++;
     
     listener[num_listeners] = setup_listener_socket(AF_INET6, IPPROTO_TCP, true,
-                                                    tls_port, NULL, "IPv6 DNS TLS Listener", dns_input, connected, 0);
+                                                    tls_port, NULL, NULL, "IPv6 DNS TLS Listener", dns_input, connected, 0);
     if (listener[num_listeners] == NULL) {
         ERROR("TLS6 listener: fail.");
         return 1;
@@ -1837,7 +1837,7 @@ main(int argc, char **argv)
 
     // If we haven't been given any addresses to listen on, listen on an IPv4 address and an IPv6 address.
     if (num_listen_addrs == 0) {
-        listener[num_listeners] = setup_listener_socket(AF_INET, IPPROTO_UDP, false, udp_port, NULL,
+        listener[num_listeners] = setup_listener_socket(AF_INET, IPPROTO_UDP, false, udp_port, NULL, NULL,
                                                         "IPv4 DNS UDP Listener", dns_input, 0, 0);
         if (listener[num_listeners] == NULL) {
             ERROR("UDP4 listener: fail.");
@@ -1845,7 +1845,7 @@ main(int argc, char **argv)
         }
         num_listeners++;
 
-        listener[num_listeners] = setup_listener_socket(AF_INET6, IPPROTO_UDP, false, udp_port, NULL,
+        listener[num_listeners] = setup_listener_socket(AF_INET6, IPPROTO_UDP, false, udp_port, NULL, NULL,
                                                         "IPv6 DNS UDP Listener", dns_input, 0, 0);
         if (listener[num_listeners] == NULL) {
             ERROR("UDP6 listener: fail.");

@@ -560,7 +560,7 @@ tcp_send_response(comm_t *comm, message_t *responding_to, struct iovec *iov, int
 }
 
 static void
-udp_send_response(comm_t *comm, message_t *responding_to, struct iovec *iov, int iov_len)
+udp_send_message(comm_t *comm, addr_t *source, addr_t *dest, int ifindex, struct iovec *iov, int iov_len)
 {
     struct msghdr mh;
     uint8_t cmsg_buf[128];
@@ -569,39 +569,59 @@ udp_send_response(comm_t *comm, message_t *responding_to, struct iovec *iov, int
     memset(&mh, 0, sizeof mh);
     mh.msg_iov = iov;
     mh.msg_iovlen = iov_len;
-    mh.msg_name = &responding_to->src;
+    mh.msg_name = dest;
     mh.msg_control = cmsg_buf;
-    mh.msg_controllen = sizeof cmsg_buf;
-    cmsg = CMSG_FIRSTHDR(&mh);
-
-    if (responding_to->src.sa.sa_family == AF_INET) {
-        struct in_pktinfo *inp;
-        mh.msg_namelen = sizeof (struct sockaddr_in);
-        mh.msg_controllen = CMSG_SPACE(sizeof *inp);
-        cmsg->cmsg_level = IPPROTO_IP;
-        cmsg->cmsg_type = IP_PKTINFO;
-        cmsg->cmsg_len = CMSG_LEN(sizeof *inp);
-        inp = (struct in_pktinfo *)CMSG_DATA(cmsg);
-        memset(inp, 0, sizeof *inp);
-        inp->ipi_ifindex = responding_to->ifindex;
-        inp->ipi_spec_dst = responding_to->local.sin.sin_addr;
-        inp->ipi_addr = responding_to->local.sin.sin_addr;
-    } else if (responding_to->src.sa.sa_family == AF_INET6) {
-        struct in6_pktinfo *inp;
-        mh.msg_namelen = sizeof (struct sockaddr_in6);
-        mh.msg_controllen = CMSG_SPACE(sizeof *inp);
-        cmsg->cmsg_level = IPPROTO_IPV6;
-        cmsg->cmsg_type = IPV6_PKTINFO;
-        cmsg->cmsg_len = CMSG_LEN(sizeof *inp);
-        inp = (struct in6_pktinfo *)CMSG_DATA(cmsg);
-        memset(inp, 0, sizeof *inp);
-        inp->ipi6_ifindex = responding_to->ifindex;
-        inp->ipi6_addr = responding_to->local.sin6.sin6_addr;
+    if (source == NULL && ifindex == 0) {
+        mh.msg_controllen = 0;
     } else {
-        ERROR("udp_send_response: unknown family %d", responding_to->src.sa.sa_family);
-        abort();
+        mh.msg_controllen = sizeof cmsg_buf;
+        cmsg = CMSG_FIRSTHDR(&mh);
+
+        if (source->sa.sa_family == AF_INET) {
+            struct in_pktinfo *inp;
+            mh.msg_namelen = sizeof (struct sockaddr_in);
+            mh.msg_controllen = CMSG_SPACE(sizeof *inp);
+            cmsg->cmsg_level = IPPROTO_IP;
+            cmsg->cmsg_type = IP_PKTINFO;
+            cmsg->cmsg_len = CMSG_LEN(sizeof *inp);
+            inp = (struct in_pktinfo *)CMSG_DATA(cmsg);
+            memset(inp, 0, sizeof *inp);
+            inp->ipi_ifindex = ifindex;
+            if (source) {
+                inp->ipi_spec_dst = source->sin.sin_addr;
+                inp->ipi_addr = source->sin.sin_addr;
+            }
+        } else if (source->sa.sa_family == AF_INET6) {
+            struct in6_pktinfo *inp;
+            mh.msg_namelen = sizeof (struct sockaddr_in6);
+            mh.msg_controllen = CMSG_SPACE(sizeof *inp);
+            cmsg->cmsg_level = IPPROTO_IPV6;
+            cmsg->cmsg_type = IPV6_PKTINFO;
+            cmsg->cmsg_len = CMSG_LEN(sizeof *inp);
+            inp = (struct in6_pktinfo *)CMSG_DATA(cmsg);
+            memset(inp, 0, sizeof *inp);
+            inp->ipi6_ifindex = ifindex;
+            if (source) {
+                inp->ipi6_addr = source->sin6.sin6_addr;
+            }
+        } else {
+            ERROR("udp_send_response: unknown family %d", source->sa.sa_family);
+            abort();
+        }
     }
     sendmsg(comm->io.sock, &mh, 0);
+}
+
+static void
+udp_send_response(comm_t *comm, message_t *responding_to, struct iovec *iov, int iov_len)
+{
+    udp_send_message(comm, &responding_to->local, &responding_to->src, responding_to->ifindex, iov, iov_len);
+}
+
+static void
+udp_send_multicast(comm_t *comm, int ifindex, struct iovec *iov, int iov_len)
+{
+    udp_send_message(comm, NULL, &comm->multicast, ifindex, iov, iov_len);
 }
 
 // When a communication is closed, scan the io event list to see if any other ios are referencing this one.
@@ -670,14 +690,15 @@ listen_callback(io_t *context)
 }
 
 comm_t *
-setup_listener_socket(int family, int protocol, bool tls, uint16_t port, const char *ip_address,
+setup_listener_socket(int family, int protocol, bool tls, uint16_t port, const char *ip_address, const char *multicast,
                       const char *name, comm_callback_t datagram_callback,
                       comm_callback_t connected, void *context)
 {
     comm_t *listener;
     socklen_t sl;
     int rv;
-    int flag = 1;
+    int false_flag = 0;
+    int true_flag = 1;
     
     listener = calloc(1, sizeof *listener);
     if (listener == NULL) {
@@ -691,33 +712,98 @@ setup_listener_socket(int family, int protocol, bool tls, uint16_t port, const c
     listener->io.sock = socket(family, protocol == IPPROTO_UDP ? SOCK_DGRAM : SOCK_STREAM, protocol);
     if (listener->io.sock < 0) {
         ERROR("Can't get socket: %s", strerror(errno));
-        comm_free(listener);
-        return NULL;
+        goto out;
     }
-    rv = setsockopt(listener->io.sock, SOL_SOCKET, SO_REUSEADDR, &flag, sizeof flag);
+    rv = setsockopt(listener->io.sock, SOL_SOCKET, SO_REUSEADDR, &true_flag, sizeof true_flag);
     if (rv < 0) {
         ERROR("SO_REUSEADDR failed: %s", strerror(errno));
-        comm_free(listener);
-        return NULL;
+        goto out;
     }
 
-    rv = setsockopt(listener->io.sock, SOL_SOCKET, SO_REUSEPORT, &flag, sizeof flag);
+    rv = setsockopt(listener->io.sock, SOL_SOCKET, SO_REUSEPORT, &true_flag, sizeof true_flag);
     if (rv < 0) {
         ERROR("SO_REUSEPORT failed: %s", strerror(errno));
-        comm_free(listener);
-        return NULL;
+        goto out;
     }
 
     if (ip_address != NULL) {
         sl = getipaddr(&listener->address, ip_address);
         if (sl == 0) {
-            comm_free(listener);
-            return NULL;
+            goto out;
         }
         if (family == AF_UNSPEC) {
             family = listener->address.sa.sa_family;
         } else if (listener->address.sa.sa_family != family) {
             ERROR("%s is not a %s address.", ip_address, family == AF_INET ? "IPv4" : "IPv6");
+            goto out;
+        }
+    }
+    
+    if (multicast != 0) {
+        if (protocol != IPPROTO_UDP) {
+            ERROR("Unable to do non-datagram multicast.");
+            goto out;
+        }
+        sl = getipaddr(&listener->multicast, multicast);
+        if (sl == 0) {
+            goto out;
+        }
+        if (listener->multicast.sa.sa_family != family) {
+            ERROR("multicast address %s from different family than listen address %s.", multicast, ip_address);
+            goto out;
+        }
+        listener->is_multicast = true;
+
+        if (family == AF_INET) {
+            struct ip_mreq im;
+            int ttl = 255;
+            im.imr_multiaddr = listener->multicast.sin.sin_addr;
+            im.imr_interface.s_addr = 0;
+            rv = setsockopt(listener->io.sock, IPPROTO_IP, IP_ADD_MEMBERSHIP, &im, sizeof im);
+            if (rv < 0) {
+                ERROR("Unable to join %s multicast group: %s", multicast, strerror(errno));
+                goto out;
+            }
+            rv = setsockopt(listener->io.sock, IPPROTO_IP, IP_MULTICAST_TTL, &ttl, sizeof ttl);
+            if (rv < 0) {
+                ERROR("Unable to set IP multicast TTL to 255 for %s: %s", multicast, strerror(errno));
+                goto out;
+            }
+            rv = setsockopt(listener->io.sock, IPPROTO_IP, IP_TTL, &ttl, sizeof ttl);
+            if (rv < 0) {
+                ERROR("Unable to set IP TTL to 255 for %s: %s", multicast, strerror(errno));
+                goto out;
+            }
+            rv = setsockopt(listener->io.sock, IPPROTO_IP, IP_MULTICAST_LOOP, &false_flag, sizeof false_flag);
+            if (rv < 0) {
+                ERROR("Unable to set IP Multcast loopback to false for %s: %s", multicast, strerror(errno));
+                goto out;
+            }
+        } else {
+            struct ipv6_mreq im;
+            int hops = 255;
+            im.ipv6mr_multiaddr = listener->multicast.sin6.sin6_addr;
+            im.ipv6mr_interface = 0;
+            rv = setsockopt(listener->io.sock, IPPROTO_IPV6, IPV6_JOIN_GROUP, &im, sizeof im);
+            if (rv < 0) {
+                ERROR("Unable to join %s multicast group: %s", multicast, strerror(errno));
+                goto out;
+            }
+            rv = setsockopt(listener->io.sock, IPPROTO_IPV6, IPV6_MULTICAST_HOPS, &hops, sizeof hops);
+            if (rv < 0) {
+                ERROR("Unable to set IPv6 multicast hops to 255 for %s: %s", multicast, strerror(errno));
+                goto out;
+            }
+            rv = setsockopt(listener->io.sock, IPPROTO_IPV6, IPV6_UNICAST_HOPS, &hops, sizeof hops);
+            if (rv < 0) {
+                ERROR("Unable to set IPv6 hops to 255 for %s: %s", multicast, strerror(errno));
+                goto out;
+            }
+            rv = setsockopt(listener->io.sock, IPPROTO_IPV6, IPV6_MULTICAST_LOOP, &false_flag, sizeof false_flag);
+            if (rv < 0) {
+                ERROR("Unable to set IPv6 Multcast loopback to false for %s: %s", multicast, strerror(errno));
+                goto out;
+            }
         }
     }
     
@@ -727,6 +813,13 @@ setup_listener_socket(int family, int protocol, bool tls, uint16_t port, const c
     } else {
         sl = sizeof listener->address.sin6;
         listener->address.sin6.sin6_port = port ? htons(port) : htons(53);
+        // Don't use a dual-stack socket.
+        rv = setsockopt(listener->io.sock, IPPROTO_IPV6, IPV6_V6ONLY, &true_flag, sizeof true_flag);
+        if (rv < 0) {
+            ERROR("Unable to set IPv6-only flag on %s socket for %s",
+                  tls ? "TLS" : protocol == IPPROTO_TCP ? "TCP" : "UDP", ip_address == NULL ? "<0>" : ip_address);
+            goto out;
+        }
     }
          
     listener->address.sa.sa_family = family;
@@ -746,7 +839,7 @@ setup_listener_socket(int family, int protocol, bool tls, uint16_t port, const c
     if (tls) {
         if (protocol != IPPROTO_TCP) {
             ERROR("Asked to do TLS over UDP, which we don't do yet.");
-            return NULL;
+            goto out;
         }
         listener->tls_context = (tls_context_t *)-1;
     }
@@ -761,7 +854,7 @@ setup_listener_socket(int family, int protocol, bool tls, uint16_t port, const c
         add_reader(&listener->io, listen_callback, NULL);
     } else {
         rv = setsockopt(listener->io.sock, family == AF_INET ? IPPROTO_IP : IPPROTO_IPV6,
-                        family == AF_INET ? IP_PKTINFO : IPV6_RECVPKTINFO, &flag, sizeof flag);
+                        family == AF_INET ? IP_PKTINFO : IPV6_RECVPKTINFO, &true_flag, sizeof true_flag);
         if (rv < 0) {
             ERROR("Can't set %s: %s.", family == AF_INET ? "IP_PKTINFO" : "IPV6_RECVPKTINFO",
                     strerror(errno));
@@ -769,6 +862,10 @@ setup_listener_socket(int family, int protocol, bool tls, uint16_t port, const c
         }
         add_reader(&listener->io, udp_read_callback, NULL);
         listener->send_response = udp_send_response;
+        listener->send_message = udp_send_message;
+        if (listener->is_multicast) {
+            listener->send_multicast = udp_send_multicast;
+        }
     }
     listener->datagram_callback = datagram_callback;
     listener->connected = connected;

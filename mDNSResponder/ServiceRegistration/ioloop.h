@@ -46,6 +46,9 @@ typedef void (*io_callback_t)(io_t *NONNULL io);
 typedef void (*comm_callback_t)(comm_t *NONNULL comm);
 typedef void (*disconnect_callback_t)(comm_t *NONNULL comm, int error);
 typedef void (*send_response_t)(comm_t *NONNULL comm, message_t *NONNULL responding_to, struct iovec *NONNULL iov, int count);
+typedef void (*send_multicast_t)(comm_t *NONNULL comm, int ifindex, struct iovec *NONNULL iov, int count);
+typedef void (*send_message_t)(comm_t *NONNULL comm, addr_t *NULLABLE source, addr_t *NONNULL dest,
+                               int ifindex, struct iovec *NONNULL iov, int count);
 
 typedef struct tls_context tls_context_t;
 
@@ -75,17 +78,20 @@ struct dso_transport {
     comm_callback_t NULLABLE datagram_callback;
     comm_callback_t NULLABLE close_callback;
     send_response_t NULLABLE send_response;
+    send_multicast_t NULLABLE send_multicast;
+    send_message_t NULLABLE send_message;
     comm_callback_t NULLABLE connected;
     disconnect_callback_t NULLABLE disconnected;
     message_t *NULLABLE message;
     uint8_t *NULLABLE buf;
     dso_state_t *NULLABLE dso;
     tls_context_t *NULLABLE tls_context;
-    addr_t address;
+    addr_t address, multicast;
     size_t message_length_len;
     size_t message_length, message_cur;
     uint8_t message_length_bytes[2];
     bool tcp_stream: 1;
+    bool is_multicast: 1;
 };
 
 extern int64_t ioloop_now;
@@ -99,8 +105,8 @@ void add_reader(io_t *NONNULL io, io_callback_t NONNULL callback, io_callback_t 
 bool ioloop_init(void);
 int ioloop_events(int64_t timeout_when);
 comm_t *NULLABLE setup_listener_socket(int family, int protocol, bool tls, uint16_t port,
-                                       const char *NULLABLE ip_address, const char *NONNULL name,
-                                       comm_callback_t NONNULL datagram_callback,
+                                       const char *NULLABLE ip_address, const char *NULLABLE multicast,
+                                       const char *NONNULL name, comm_callback_t NONNULL datagram_callback,
                                        comm_callback_t NULLABLE connected, void *NULLABLE context);
 comm_t *NULLABLE connect_to_host(addr_t *NONNULL remote_address, bool tls,
                                  comm_callback_t NONNULL datagram_callback,
