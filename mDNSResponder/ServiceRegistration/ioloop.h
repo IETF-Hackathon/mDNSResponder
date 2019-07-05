@@ -31,6 +31,13 @@ union addr {
     struct sockaddr_in6 sin6;
 };
 
+#define IOLOOP_NTOP(addr, buf) \
+    (((addr)->sa.sa_family == AF_INET || (addr)->sa.sa_family == AF_INET6) \
+     ? (inet_ntop((addr)->sa.sa_family, ((addr)->sa.sa_family == AF_INET \
+                                        ? (void *)&(addr)->sin.sin_addr \
+                                        : (void *)&(addr)->sin6.sin6_addr), buf, sizeof buf) != NULL) \
+    : snprintf(buf, sizeof buf, "Address type %d", (addr)->sa.sa_family))
+
 typedef struct message message_t;
 struct message {
     addr_t src;
@@ -49,6 +56,10 @@ typedef void (*send_response_t)(comm_t *NONNULL comm, message_t *NONNULL respond
 typedef void (*send_multicast_t)(comm_t *NONNULL comm, int ifindex, struct iovec *NONNULL iov, int count);
 typedef void (*send_message_t)(comm_t *NONNULL comm, addr_t *NULLABLE source, addr_t *NONNULL dest,
                                int ifindex, struct iovec *NONNULL iov, int count);
+enum interface_address_change { interface_address_added, interface_address_deleted };
+typedef void (*interface_callback_t)(void *NULLABLE context, const char *NONNULL name,
+                                     const addr_t *NONNULL address, const addr_t *NONNULL netmask, int index,
+                                     enum interface_address_change event_type);
 
 typedef struct tls_context tls_context_t;
 
@@ -113,6 +124,7 @@ comm_t *NULLABLE connect_to_host(addr_t *NONNULL remote_address, bool tls,
                                  comm_callback_t NONNULL connected,
                                  disconnect_callback_t NONNULL disconnected,
                                  void *NONNULL context);
+bool map_interface_addresses(void *NULLABLE context, interface_callback_t NONNULL callback);
 #endif
 
 // Local Variables:

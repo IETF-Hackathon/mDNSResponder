@@ -82,11 +82,18 @@ struct hardwired {
     uint16_t rdlen;
 };
 
+typedef struct interface_addr interface_addr_t;
+struct interface_addr {
+    interface_addr_t *next;
+    addr_t addr, mask;
+};
+
 typedef struct interface interface_t;
 struct interface {
     int ifindex;                        // The interface index (for use with sendmsg() and recvmsg().
     bool no_push;                       // If true, don't set up DNS Push for this domain
     char *name;                         // The name of the interface
+    interface_addr_t *addresses;        // Addresses on this interface.
 };
 
 typedef struct served_domain served_domain_t;
@@ -276,22 +283,28 @@ dp_query_add_data_to_response(dnssd_query_t *query, const char *fullname,
         return;
     }
     // Don't send A records for 127.* nor AAAA records for ::1
-    if (rrtype == dns_rrtype_a) {
-        if (rdlen == 4 && rd[0] == 127) {
+    if (rrtype == dns_rrtype_a && rdlen == 4) {
+        struct in_addr addr;
+        addr = *(struct in_addr *)rdata;
+        if (IN_LOOPBACK(&addr)) {
             INFO("Eliding localhost response for %s: %d.%d.%d.%d", fullname, rd[0], rd[1], rd[2], rd[3]);
             return;
         }
-    } else if (rrtype == dns_rrtype_aaaa && rdlen == 16) {
-        int i;
-        for (i = 0; i < 15; i++) {
-            if (rd[i] != 0) {
-                break;
-            }
+        if (IN_LINKLOCAL(&addr)) {
+            INFO("Eliding link-local response for %s: %d.%d.%d.%d", fullname, rd[0], rd[1], rd[2], rd[3]);
+            return;
         }
-        if (i == 15 && rd[15] == 1) {
-            char abuf[INET6_ADDRSTRLEN + 1];
+    } else if (rrtype == dns_rrtype_aaaa && rdlen == 16) {
+        struct in6_addr addr = *(struct in6_addr *)rdata;
+        char abuf[INET6_ADDRSTRLEN + 1];
+        if (IN6_IS_ADDR_LOOPBACK(&addr)) {
             inet_ntop(AF_INET6, rdata, abuf, sizeof abuf);
             INFO("Eliding localhost response for %s: %s", fullname, abuf);
+            return;
+        }
+        if (IN6_IS_ADDR_LINKLOCAL(&addr)) {
+            inet_ntop(AF_INET6, rdata, abuf, sizeof abuf);
+            INFO("Eliding link-local response for %s: %d.%d.%d.%d", fullname, rd[0], rd[1], rd[2], rd[3]);
             return;
         }
     }
@@ -414,9 +427,8 @@ dnssd_hardwired_add(served_domain_t *sdt,
 
 void dnssd_hardwired_lbdomains_setup(dns_towire_state_t *towire, dns_wire_t *wire)
 {
-    served_domain_t *ip6 = NULL, *inaddr = NULL;
+    served_domain_t *ip6 = NULL, *ipv4 = NULL, *addr_domain, *interface_domain;
     char name[DNS_MAX_NAME_SIZE + 1];
-    struct ifaddrs *addr, *addrs;
 
 #define RESET \
     memset(towire, 0, sizeof *towire); \
@@ -424,90 +436,118 @@ void dnssd_hardwired_lbdomains_setup(dns_towire_state_t *towire, dns_wire_t *wir
     towire->p = wire->data; \
     towire->lim = towire->p + sizeof wire->data
 
-    if (getifaddrs(&addrs) < 0) {
-        INFO("getifaddrs failed: %s", strerror(errno));
-    }
-
-    RESET;
-    dns_full_name_to_wire(NULL, towire, my_name);
-
-    for (addr = addrs; addr; addr = addr->ifa_next) {
-        INFO("%s %x %p %p %d %s", addr->ifa_name,
-             addr->ifa_flags & (IFF_LOOPBACK | IFF_POINTOPOINT),
-             addr->ifa_addr, addr->ifa_netmask,
-             addr->ifa_addr != NULL ? addr->ifa_addr->sa_family : -1,
-             (addr->ifa_addr == NULL
-              ? "<>"
-              : (addr->ifa_addr->sa_family == AF_INET
-                 ? "<ipv4>"
-                 : (addr->ifa_addr->sa_family == AF_INET6 ? "<ipv6>" : "<other>"))));
-        // We don't need to provide discovery for these.
-        if (addr->ifa_addr == NULL || addr->ifa_flags & (IFF_LOOPBACK | IFF_POINTOPOINT)) {
+    for (addr_domain = served_domains; addr_domain; addr_domain = addr_domain->next) {
+        interface_t *interface = addr_domain->interface;
+        interface_addr_t *ifaddr;
+        if (interface == NULL) {
+            INFO("Domain %s has no interface", addr_domain->domain);
             continue;
         }
-        if (addr->ifa_addr->sa_family == AF_INET && addr->ifa_netmask != NULL) {
-            uint8_t *address = (uint8_t *)&((struct sockaddr_in *)addr->ifa_addr)->sin_addr;
-            uint8_t *mask = (uint8_t *)&((struct sockaddr_in *)addr->ifa_netmask)->sin_addr;
-            char *bp;
-            int space = sizeof name;
-            int i;
-            snprintf(name, space, "lb._dns-sd._udp");
-            bp = name + strlen(name);
-            for (i = 0; i < 4; i++) {
-                if (mask[i] == 0)
-                    break;
-            }
-            i--;
-            for (; i >= 0; i--) {
-                snprintf(bp, (sizeof name) - (bp - name), ".%d", address[i] & mask[i]);
-                bp += strlen(bp);
-            }
-            if (inaddr == NULL) {
-                inaddr = new_served_domain(NULL, "in-addr.arpa.");
-                if (inaddr == NULL) {
-                    ERROR("No space for in-addr.arpa.");
-                    return;
+        for (ifaddr = interface->addresses; ifaddr != NULL; ifaddr = ifaddr->next) {
+            if (ifaddr->addr.sa.sa_family == AF_INET) {
+                uint8_t *address = (uint8_t *)&(ifaddr->addr.sin.sin_addr);
+                uint8_t *mask = (uint8_t *)&(ifaddr->mask.sin.sin_addr);
+                char *bp;
+                int space = sizeof name;
+                int i;
+
+                if (IN_LOOPBACK(&ifaddr->addr.sin.sin_addr)) {
+                    INFO("Skipping IPv4 loopback address on %s (%s)", addr_domain->domain, interface->name);
+                    continue;
                 }
-            }
-            dnssd_hardwired_add(inaddr, name, inaddr->domain_ld, towire->p - wire->data, wire->data, dns_rrtype_ptr);
-        } else if (addr->ifa_addr->sa_family == AF_INET6 && addr->ifa_netmask != NULL &&
-                   !IN6_IS_ADDR_LINKLOCAL(&((struct sockaddr_in6 *)addr->ifa_addr)->sin6_addr)) {
-            uint8_t *address = (uint8_t *)&((struct sockaddr_in6 *)addr->ifa_addr)->sin6_addr;
-            uint8_t *mask = (uint8_t *)&((struct sockaddr_in6 *)addr->ifa_netmask)->sin6_addr;
-            char *bp;
-            int space = sizeof name;
-            int i, word, ishift, shift;
-            snprintf(name, space, "lb._dns-sd._udp");
-            bp = name + strlen(name);
-            for (i = 16; i >= 0; i--) {
-                word = i; // Four 32-bit words in an IPv6 address
-                for (shift = 0; shift < 8; shift += 4) {
-                    if ((mask[word] & (15 << shift)) != 0)
-                        goto out;
+
+                if (IN_LINKLOCAL(&ifaddr->addr.sin.sin_addr)) {
+                    INFO("Skipping IPv4 link local address on %s (%s)", addr_domain->domain, interface->name);
+                    continue;
                 }
-            }
-        out:
-            ishift = shift;
-            for (; i  >= 0; i--) {
-                word = i;
-                for (shift = ishift; shift < 8; shift += 4) {
-                    snprintf(bp, (sizeof name) - (bp - name), ".%x",
-                             (address[word] >> shift) & (mask[word] >> shift) & 15);
+
+                snprintf(name, space, "lb._dns-sd._udp");
+                bp = name + strlen(name);
+                for (i = 0; i < 4; i++) {
+                    if (mask[i] == 0)
+                        break;
+                }
+                i--;
+                for (; i >= 0; i--) {
+                    snprintf(bp, space - (bp - name), ".%d", address[i] & mask[i]);
                     bp += strlen(bp);
                 }
-                ishift = 0;
-            }
-            if (ip6 == NULL) {
-                ip6 = new_served_domain(NULL, "ip6.arpa.");
-                if (ip6 == NULL) {
-                    ERROR("No space for ip6.arpa.");
-                    return;
+                if (ipv4 == NULL) {
+                    ipv4 = new_served_domain(NULL, "in-addr.arpa.");
+                    if (ipv4 == NULL) {
+                        ERROR("No space for in-addr.arpa.");
+                        return;
+                    }
                 }
+
+                INFO("Adding PTRs for %s", name);
+                for (interface_domain = served_domains; interface_domain != NULL; interface_domain = interface_domain->next) {
+                    if (interface_domain->interface == NULL || interface_domain->interface->ifindex == 0) {
+                        continue;
+                    }
+                    RESET;
+                    INFO("Adding PTR from %s to %s", name, interface_domain->domain);
+                    dns_full_name_to_wire(NULL, towire, interface_domain->domain);
+                    dnssd_hardwired_add(ipv4, name, ipv4->domain_ld, towire->p - wire->data, wire->data, dns_rrtype_ptr);
+                }
+            } else if (ifaddr->addr.sa.sa_family == AF_INET6) {
+                uint8_t *address = (uint8_t *)&(ifaddr->addr.sin6.sin6_addr);
+                uint8_t *mask = (uint8_t *)&(ifaddr->mask.sin6.sin6_addr);
+                char *bp;
+                int space = sizeof name;
+                int i, word, ishift, shift;
+
+                if (IN6_IS_ADDR_LOOPBACK(&ifaddr->addr.sin6.sin6_addr)) {
+                    INFO("Skipping IPv6 link local address on %s (%s)", addr_domain->domain, interface->name);
+                    continue;
+                }
+                if (IN6_IS_ADDR_LINKLOCAL(&ifaddr->addr.sin6.sin6_addr)) {
+                    INFO("Skipping IPv6 link local address on %s (%s)", addr_domain->domain, interface->name);
+                }
+                snprintf(name, space, "lb._dns-sd._udp");
+                bp = name + strlen(name);
+                for (i = 16; i >= 0; i--) {
+                    word = i; // Four 32-bit words in an IPv6 address
+                    for (shift = 0; shift < 8; shift += 4) {
+                        if ((mask[word] & (15 << shift)) != 0)
+                            goto out;
+                    }
+                }
+            out:
+                ishift = shift;
+                for (; i  >= 0; i--) {
+                    word = i;
+                    for (shift = ishift; shift < 8; shift += 4) {
+                        snprintf(bp, (sizeof name) - (bp - name), ".%x", 
+                                (address[word] >> shift) & (mask[word] >> shift) & 15);
+                        bp += strlen(bp);
+                    }
+                    ishift = 0;
+                }
+                if (ip6 == NULL) {
+                    ip6 = new_served_domain(NULL, "ip6.arpa.");
+                    if (ip6 == NULL) {
+                        ERROR("No space for ip6.arpa.");
+                        return;
+                    }
+                }
+                INFO("Adding PTRs for %s", name);
+                for (interface_domain = served_domains; interface_domain != NULL; interface_domain = interface_domain->next) {
+                    if (interface_domain->interface == NULL || interface_domain->interface->ifindex == 0) {
+                        continue;
+                    }
+                    INFO("Adding PTR from %s to %s", name, interface_domain->domain);
+                    RESET;
+                    dns_full_name_to_wire(NULL, towire, interface_domain->domain);
+                    dnssd_hardwired_add(ip6, name, ip6->domain_ld, towire->p - wire->data, wire->data, dns_rrtype_ptr);
+                }
+            } else {
+                char buf[INET6_ADDRSTRLEN];
+                IOLOOP_NTOP(&ifaddr->addr, buf);
+                INFO("Skipping %s", buf);
             }
-            dnssd_hardwired_add(ip6, name, ip6->domain_ld, towire->p - wire->data, wire->data, dns_rrtype_ptr);
         }
     }
-    freeifaddrs(addrs);
 #undef RESET
 }
 
@@ -1626,8 +1666,70 @@ new_served_domain(interface_t *interface, char *domain)
     return sdt;
 }
 
+// Dynamic interface detection...
+// This is called whenever a new interface address is encountered.  At present, this is only called
+// once for each interface address, on startup, but in principle it _could_ be called whenever an
+// interface is added or deleted, or is assigned or loses an address.
+void
+ifaddr_callback(void *context, const char *name, const addr_t *address, const addr_t *mask,
+                int ifindex, enum interface_address_change event_type)
+{
+    char buf[INET6_ADDRSTRLEN], buf1[INET6_ADDRSTRLEN];
+    served_domain_t *sd;
+    if (!inet_ntop(address->sa.sa_family, (address->sa.sa_family == AF_INET
+                                           ? (void *)&address->sin.sin_addr
+                                           : (void *)&address->sin6.sin6_addr), buf, sizeof buf)) {
+        snprintf(buf, sizeof buf, "Address type %d", address->sa.sa_family);
+    }
+    if (!inet_ntop(mask->sa.sa_family, (mask->sa.sa_family == AF_INET
+                                        ? (void *)&mask->sin.sin_addr
+                                        : (void *)&mask->sin6.sin6_addr), buf1, sizeof buf)) {
+        snprintf(buf1, sizeof buf1, "Address type %d", mask->sa.sa_family);
+    }
+    INFO("Interface %s address %s mask %s index %d %s", name, buf, buf1, ifindex,
+         event_type == interface_address_added ? "added" : "removed");
+
+    for (sd = *((served_domain_t **)context); sd; sd = sd->next) {
+        if (sd->interface != NULL && !strcmp(sd->interface->name, name)) {
+            interface_addr_t **app, *ifaddr;
+            if (event_type == interface_address_added) {
+                for (app = &sd->interface->addresses; *app; app = &(*app)->next)
+                    ;
+                ifaddr = calloc(1, sizeof *ifaddr);
+                sd->interface->ifindex = ifindex;
+                if (ifaddr != NULL) {
+                    ifaddr->addr = *address;
+                    ifaddr->mask = *mask;
+                    *app = ifaddr;
+                }
+            } else if (event_type == interface_address_deleted) {
+                for (app = &sd->interface->addresses; *app; ) {
+                    ifaddr = *app;
+                    if (ifaddr->addr.sa.sa_family == address->sa.sa_family &&
+                        ((address->sa.sa_family == AF_INET &&
+                          ifaddr->addr.sin.sin_addr.s_addr == address->sin.sin_addr.s_addr &&
+                          ifaddr->mask.sin.sin_addr.s_addr == address->sin.sin_addr.s_addr) ||
+                         (address->sa.sa_family == AF_INET6 &&
+                          !memcmp(&ifaddr->addr.sin6.sin6_addr, &address->sin6.sin6_addr, sizeof address->sin6.sin6_addr) &&
+                          !memcmp(&ifaddr->mask.sin6.sin6_addr, &mask->sin6.sin6_addr, sizeof mask->sin6.sin6_addr))))
+                    {
+                        *app = ifaddr->next;
+                        free(ifaddr);
+                    } else {
+                        app = &ifaddr->next;
+                    }
+                }
+                if (sd->interface->addresses == NULL) {
+                    sd->interface->ifindex = 0;
+                }
+            }
+        }
+    }    
+}
+
 // Config file parsing...
-static bool interface_handler(void *context, const char *filename, char **hunks, int num_hunks, int lineno)
+static bool
+interface_handler(void *context, const char *filename, char **hunks, int num_hunks, int lineno)
 {
     interface_t *interface = calloc(1, sizeof *interface);
     if (interface == NULL) {
@@ -1725,21 +1827,6 @@ config_file_verb_t dp_verbs[] = {
 };
 #define NUMCFVERBS ((sizeof dp_verbs) / sizeof (config_file_verb_t))
 
-static bool map_interfaces(void)
-{
-#if 0
-    struct ifaddrs *ifaddrs, *ifp;
-
-    if (getifaddrs(&ifaddrs) < 0) {
-        ERROR("getifaddrs failed: %s", sterror(errno));
-        return false;
-    }
-
-    for (ifp = ifaddrs; ifp; ifp = ifp->ifa_next) {
-#endif
-        return false;
-}
-
 int
 main(int argc, char **argv)
 {
@@ -1771,7 +1858,7 @@ main(int argc, char **argv)
         return 1;
     }
 
-    map_interfaces();
+    map_interface_addresses(&served_domains, ifaddr_callback);
 
     if (!srp_tls_init()) {
         return 1;

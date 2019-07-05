@@ -35,6 +35,8 @@
 #include <fcntl.h>
 #include <sys/time.h>
 #include <signal.h>
+#include <net/if.h>
+#include <ifaddrs.h>
 
 #include "srp.h"
 #include "dns-msg.h"
@@ -971,6 +973,117 @@ connect_to_host(addr_t *NONNULL remote_address, bool tls,
     connection->datagram_callback = datagram_callback;
     connection->context = context;
     return connection;
+}
+
+typedef struct interface_addr interface_addr_t;
+struct interface_addr {
+    interface_addr_t *next;
+    char *name;
+    addr_t addr;
+    addr_t mask;
+    int index;
+};
+interface_addr_t *interface_addresses;
+
+bool map_interface_addresses(void *context, interface_callback_t callback)
+{
+    struct ifaddrs *ifaddrs, *ifp;
+    interface_addr_t *kept_ifaddrs = NULL, **ki_end = &kept_ifaddrs;
+    interface_addr_t *new_ifaddrs = NULL, **ni_end = &new_ifaddrs;
+    interface_addr_t **ip, *nif;
+    char *ifname = NULL;
+    int ifindex = 0;
+    
+    if (getifaddrs(&ifaddrs) < 0) {
+        ERROR("getifaddrs failed: %s", strerror(errno));
+        return false;
+    }
+
+    for (ifp = ifaddrs; ifp; ifp = ifp->ifa_next) {
+        // Is this an interface address we can use?
+        if (ifp->ifa_addr != NULL && ifp->ifa_netmask != NULL &&
+            (ifp->ifa_addr->sa_family == AF_INET ||
+             ifp->ifa_addr->sa_family == AF_INET6) &&
+            (ifp->ifa_flags & IFF_UP) &&
+            !(ifp->ifa_flags & IFF_POINTOPOINT))
+        {
+            bool keep = false;
+            for (ip = &interface_addresses; *ip != NULL; ) {
+                interface_addr_t *ia = *ip;
+                // Same interface and address?
+                if (!strcmp(ia->name, ifp->ifa_name) &&
+                    ifp->ifa_addr->sa_family == ia->addr.sa.sa_family &&
+                    ((ifp->ifa_addr->sa_family == AF_INET &&
+                      ((struct sockaddr_in *)ifp->ifa_addr)->sin_addr.s_addr == ia->addr.sin.sin_addr.s_addr) ||
+                     (ifp->ifa_addr->sa_family == AF_INET6 &&
+                      !memcmp(&((struct sockaddr_in6 *)ifp->ifa_addr)->sin6_addr,
+                              &ia->addr.sin6.sin6_addr, sizeof ia->addr.sin6.sin6_addr))) &&
+                    ((ifp->ifa_netmask->sa_family == AF_INET &&
+                      ((struct sockaddr_in *)ifp->ifa_netmask)->sin_addr.s_addr == ia->mask.sin.sin_addr.s_addr) ||
+                     (ifp->ifa_netmask->sa_family == AF_INET6 &&
+                      !memcmp(&((struct sockaddr_in6 *)ifp->ifa_netmask)->sin6_addr,
+                              &ia->mask.sin6.sin6_addr, sizeof ia->mask.sin6.sin6_addr))))
+                {
+                    *ki_end = ia;
+                    ki_end = &ia->next;
+                    keep = true;
+                    break;
+                } else {
+                    ip = &ia->next;
+                }
+            }
+            // If keep is false, this is a new interface.
+            if (!keep) {
+                nif = calloc(1, strlen(ifp->ifa_name) + 1 + sizeof *nif);
+                // We don't have a way to fix nif being null; what this means is that we don't detect a new
+                // interface address.
+                if (nif != NULL) {
+                    nif->name = (char *)(nif + 1);
+                    strcpy(nif->name, ifp->ifa_name);
+                    if (ifp->ifa_addr->sa_family == AF_INET) {
+                        nif->addr.sin = *((struct sockaddr_in *)ifp->ifa_addr);
+                        nif->mask.sin = *((struct sockaddr_in *)ifp->ifa_netmask);
+                    } else {
+                        nif->addr.sin6 = *((struct sockaddr_in6 *)ifp->ifa_addr);
+                        nif->mask.sin6 = *((struct sockaddr_in6 *)ifp->ifa_netmask);
+                    }
+                    *ni_end = nif;
+                    ni_end = &nif->next;
+                }
+            }
+        }
+    }
+
+    // Report and free deleted interface addresses...
+    for (nif = interface_addresses; nif; ) {
+        interface_addr_t *next = nif->next;
+        callback(context, nif->name, &nif->addr, &nif->mask, nif->index, interface_address_deleted);
+        free(nif);
+        nif = next;
+    }
+
+    // Report added interface addresses...
+    for (nif = new_ifaddrs; nif; nif = nif->next) {
+        // Get interface index using standard API if AF_LINK didn't work.
+        if (nif->index == 0) {
+            if (ifindex != 0 && ifname != NULL && !strcmp(ifname, nif->name)) {
+                nif->index = ifindex;
+            } else {
+                ifname = nif->name;
+                ifindex = if_nametoindex(nif->name);
+                nif->index = ifindex;
+                INFO("Got interface index for %s the hard way: %d", nif->name, nif->index);
+            }
+        }
+        callback(context, nif->name, &nif->addr, &nif->mask, nif->index, interface_address_added);
+    }
+
+    // Restore kept interface addresses and append new addresses to the list.
+    interface_addresses = kept_ifaddrs;
+    for (ip = &new_ifaddrs; *ip; ip = &(*ip)->next)
+        ;
+    *ip = new_ifaddrs;
+    return true;
 }
 
 // Local Variables:
