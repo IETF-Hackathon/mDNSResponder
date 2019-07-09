@@ -443,6 +443,7 @@ void dnssd_hardwired_lbdomains_setup(dns_towire_state_t *towire, dns_wire_t *wir
             INFO("Domain %s has no interface", addr_domain->domain);
             continue;
         }
+        INFO("Interface %s", interface->name);
         for (ifaddr = interface->addresses; ifaddr != NULL; ifaddr = ifaddr->next) {
             if (ifaddr->addr.sa.sa_family == AF_INET) {
                 uint8_t *address = (uint8_t *)&(ifaddr->addr.sin.sin_addr);
@@ -463,12 +464,7 @@ void dnssd_hardwired_lbdomains_setup(dns_towire_state_t *towire, dns_wire_t *wir
 
                 snprintf(name, space, "lb._dns-sd._udp");
                 bp = name + strlen(name);
-                for (i = 0; i < 4; i++) {
-                    if (mask[i] == 0)
-                        break;
-                }
-                i--;
-                for (; i >= 0; i--) {
+                for (i = 3; i >= 0; i--) {
                     snprintf(bp, space - (bp - name), ".%d", address[i] & mask[i]);
                     bp += strlen(bp);
                 }
@@ -503,21 +499,13 @@ void dnssd_hardwired_lbdomains_setup(dns_towire_state_t *towire, dns_wire_t *wir
                 }
                 if (IN6_IS_ADDR_LINKLOCAL(&ifaddr->addr.sin6.sin6_addr)) {
                     INFO("Skipping IPv6 link local address on %s (%s)", addr_domain->domain, interface->name);
+                    continue;
                 }
                 snprintf(name, space, "lb._dns-sd._udp");
                 bp = name + strlen(name);
                 for (i = 16; i >= 0; i--) {
-                    word = i; // Four 32-bit words in an IPv6 address
-                    for (shift = 0; shift < 8; shift += 4) {
-                        if ((mask[word] & (15 << shift)) != 0)
-                            goto out;
-                    }
-                }
-            out:
-                ishift = shift;
-                for (; i  >= 0; i--) {
                     word = i;
-                    for (shift = ishift; shift < 8; shift += 4) {
+                    for (shift = 0; shift < 8; shift += 4) {
                         snprintf(bp, (sizeof name) - (bp - name), ".%x", 
                                 (address[word] >> shift) & (mask[word] >> shift) & 15);
                         bp += strlen(bp);
