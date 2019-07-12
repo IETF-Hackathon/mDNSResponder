@@ -6,30 +6,33 @@ This code is Open Source under the Apache 2.0 license.
 
 This work is the product of the IETF [DNSSD](https://datatracker.ietf.org/wg/dnssd/about/) Working Group.
 
+This work was
+[presented at the 2019 Apple Worldwide Developer Conference (WWDC) networking session](https://developer.apple.com/videos/play/wwdc2019/713/?time=112).
+
 The specification for the DNS-SD Discovery Proxy can be found in
 [draft-ietf-dnssd-hybrid](https://tools.ietf.org/html/draft-ietf-dnssd-hybrid).
 
 Other useful background reading includes
-[Multicast DNS (RFC 6762)](https://tools.ietf.org/html/rfc6762) and
-[DNS-Based Service Discovery (RFC 6763)](https://tools.ietf.org/html/rfc6763).
+[Multicast DNS (RFC 6762)](https://tools.ietf.org/html/rfc6762),
+[DNS-Based Service Discovery (RFC 6763)](https://tools.ietf.org/html/rfc6763),
+[DNS Stateful Operations (RFC 8490)](https://tools.ietf.org/html/rfc8490), and
+[DNS Push Notifications](https://tools.ietf.org/html/draft-ietf-dnssd-push).
 
-This work was
-[presented at the 2019 Apple Worldwide Developer Conference (WWDC) networking session](https://developer.apple.com/videos/play/wwdc2019/713/?time=112).
-
-This document last updated 2019-06-13.
+This document last updated 2019-07-12.
 
 ## Example Scenario
 
 A very common configuration in many company networks today is that
 the network printers (which all support AirPrint) are connected to wired Ethernet,
-and the iPhones and iPads (which also support AirPrint) are connected via Wi-Fi,
+and the iPhones and iPads (AirPrint clients) are connected via Wi-Fi,
 which is a different link, and a different IPv4 subnet and/or IPv6 prefix.
-This means that the iPhones and iPads on Wi-Fi can’t discover the AirPrint printers on Ethernet,
+Even though the iPhones and iPads are fully capable of connecting to, and using, the AirPrint printers,
+the problem is that the iPhones and iPads on Wi-Fi can’t discover the AirPrint printers on Ethernet,
 because, by design, link-local [Multicast DNS](https://tools.ietf.org/html/rfc6762)
 does not cross between different links.
-In addition, even if the Wi-Fi Access Point were configured to bridge between
-Ethernet and Wi-Fi, making them one logical link, there are other impediments
-to multicast-based discovery.
+In principle the Wi-Fi Access Point could be configured to bridge between
+Ethernet and Wi-Fi, making them one logical link, but there are a number of impediments
+that make this a bad idea.
 Multicast on Wi-Fi is unreliable, slow, and very wasteful of precious wireless spectrum.
 Because of this, it is becoming increasingly common to limit or disable multicast on Wi-Fi,
 thereby breaking discovery even in cases where you might have expected it to work.
@@ -38,7 +41,7 @@ Installing a DNS-SD Discovery Proxy,
 either on the Wi-Fi Access Point itself,
 or on any other device connected to the wired Ethernet,
 solves this problem.
-With the appropriate automated configuration in place,
+With the appropriate network configuration in place,
 clients on Wi-Fi automatically know to talk to that proxy to perform
 [Multicast DNS](https://tools.ietf.org/html/rfc6762)
 queries on their behalf.
@@ -75,24 +78,22 @@ There are four steps to building and operating a DNS-SD Discovery Proxy on your 
 
 4. Configuring clients with your chosen DNS subdomain name for wide-area discovery.
 
-## Building the Discovery Proxy code
+## Option (i) Building the Discovery Proxy Code Yourself
 
 If you want to build this code to run on a Mac or Linux machine, follow the instructions here.
 If you just want to run the prebuilt package on an OpenWrt device, you can skip ahead to
-“Installing the Prebuilt Package”.
+“Option (ii) Installing the Prebuilt Package for OpenWrt”.
 
 Because this code is targeted at small embedded devices, it uses mbedtls.
 If you don’t already have mbedtls installed, you can get it using the following commands:
 
 	git clone --recursive https://github.com/ARMmbed/mbedtls
-	make
+	cd mbedtls
+	make no_test
 	sudo make install
 
-The tests need Python to be built and Perl to be run. If you don't have one of them installed, you can skip building the tests with:
-
-	make no_test
-
-Clone this Git repository:
+Once you have mbedtls installed, change directory to the location where you want
+your copy of the mDNSResponder code and clone this Git repository:
 
 	git clone --branch release https://github.com/IETF-Hackathon/mDNSResponder.git
 
@@ -101,25 +102,36 @@ change directory to “mDNSResponder/ServiceRegistration” and type “make”.
 
 In the “build” subdirectory this will create the dnssd-proxy executable.
 
-## Installing the Prebuilt Package for OpenWrt
+## Option (ii) Installing the Prebuilt Package for OpenWrt
 
-At the moment prebuilt packages are only available for the router we are using internally for development,
+If you just built the code yourself for Mac or Linux, you can skip ahead to
+“Picking a DNS Subdomain Name for your Advertised Services”.
+If you’re using OpenWrt and don’t want to build the code yourself,
+we have a prebuilt package for the router we are using for development,
 the [GL-iNet AR750S](https://www.gl-inet.com/products/gl-ar750s/).
-These packages may also work on routers with similar configurations.
+This package may also work on routers with similar configurations.
 
-There are two ways to install the proxy on an OpenWrt device.
-These instructions explain how to do it using the command line;
-we will produce a video that shows how to do it using the user interface.
+Connect the WAN port of the AR750S to your existing home network,
+and connect your computer to a LAN port or the AR750S’s Wi-Fi network.
+Ensure that your AR750S is up to date with the latest firmware from GL-iNet.
 
-To install the proxy using the command line, bring up a Terminal window on your Mac, which must be
-connected to the OpenWrt device.  The OpenWrt device must have a working Internet connection.
-To connect to the router, type:
+Your AR750S should be in the default configuration,
+where it is obtaining an IP address for itself using DHCP on its WAN port (your existing home network),
+and sharing that IP address with its LAN (and Wi-Fi) clients by operating its own DHCP server and NAT gateway.
+
+At this point, take a moment to observe that your computer connected to the AR750S’s
+LAN port or Wi-Fi cannot discover anything on the WAN port side.
+If you press Cmd-Shift-K (“New Remote Connection”) in Terminal, you’ll not see any services on the WAN port side.
+If you go to System Preferences and try to add a printer, you’ll not discover any printers on the WAN port side.
+
+To install the proxy using the command line, bring up a Terminal window on your Mac and type:
 
     ssh 192.168.8.1 -l root
 
-Then enter the admin password that you configured when you set up the router.
-You can also install an ssh key on the router using
-[the router’s web user interface](http://192.168.8.1/cgi-bin/luci/admin/system/admin).
+Enter the admin password that you configured when you set up the router.
+(To save having to enter the password every time,
+for convenience you can also install your ssh key on the router using
+[the router’s web user interface](http://192.168.8.1/cgi-bin/luci/admin/system/admin)).
 
 When you are at a command prompt on the router, install the libustream-mbedtls and mbedtls-util packages,
 to enable secure https package downloads:
@@ -127,7 +139,7 @@ to enable secure https package downloads:
 	opkg update
 	opkg install libustream-mbedtls mbedtls-util
 
-Now add a line to the end of /etc/opkg/customfeeds.conf to add our OpenWrt package, as shown below:
+Add a line to the end of /etc/opkg/customfeeds.conf to add our OpenWrt package, as shown below:
 
     echo 'src/gz dnssd https://raw.githubusercontent.com/IETF-Hackathon/mDNSResponder/release/OpenWrt/packages/mips_24kc/base' >> /etc/opkg/customfeeds.conf
 
@@ -135,17 +147,37 @@ To fetch the new feed, once again:
 
     opkg update
 
-Now remove the dnsmasq package, since we’re installing a new DNS server:
+Remove the dnsmasq package, since we’re installing a new DNS server:
 
     opkg remove dnsmasq
 
-Now install the ISC DHCP server,
+Install the ISC DHCP server,
 which is needed to provide DHCP service now that dnsmasq is no longer present,
 the mbedtls-write package, and dnssd-proxy package, which also installs the mDNSResponder package:
 
     opkg install isc-dhcp-server-ipv4 mbedtls-write dnssd-proxy
 
-At this point you are ready to continue with configuring your Discovery Proxy.
+At this point your Discovery Proxy is configured and running.
+In this default configuration your Discovery Proxy is configured
+to offer Discovery Proxy service on the LAN ports (and Wi-Fi),
+using Multicast DNS to discover existing services
+on its WAN port (your existing home network).
+Wait a few minutes for your computer to notice the new Discovery Proxy,
+or disconnect from the AR750S and reconnect to speed up the detection process.
+
+Try again to see what your computer can discover now.
+
+If you have network printers on your existing home network,
+they will now appear in when you click the “+” button to add a printer
+in the “Printers & Scanners” section of System Preferences.
+
+If you have machines with ssh enabled that are usually visible
+in “New Remote Connection” in Terminal, they should now be visible
+when you’re connected to a AR750S LAN port or Wi-Fi.
+
+You now have a working Discovery Proxy, with a default configuration
+that makes its WAN port services visible to downstream clients on LAN or Wi-Fi.
+For other configuration options, continue below.
 
 ## Picking a DNS Subdomain Name for your Advertised Services
 
