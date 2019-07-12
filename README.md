@@ -82,7 +82,7 @@ There are four steps to building and operating a DNS-SD Discovery Proxy on your 
 
 If you want to build this code to run on a Mac or Linux machine, follow the instructions here.
 If you just want to run the prebuilt package on an OpenWrt device, you can skip ahead to
-“Option (ii) Installing the Prebuilt Package for OpenWrt”.
+[Option (ii) Installing the Prebuilt Package for OpenWrt](#option-ii-installing-the-prebuilt-package-for-openwrt).
 
 Because this code is targeted at small embedded devices, it uses mbedtls.
 If you don’t already have mbedtls installed, you can get it using the following commands:
@@ -101,11 +101,11 @@ Within your cloned copy of the repository,
 change directory to “mDNSResponder/ServiceRegistration” and type “make”.
 
 In the “build” subdirectory this will create the dnssd-proxy executable.
+Now you have built the code yourself, you can skip ahead to
+[Picking a DNS Subdomain Name for your Advertised Services](#picking-a-dns-subdomain-name-for-your-advertised-services).
 
 ## Option (ii) Installing the Prebuilt Package for OpenWrt
 
-If you just built the code yourself for Mac or Linux, you can skip ahead to
-“Picking a DNS Subdomain Name for your Advertised Services”.
 If you’re using OpenWrt and don’t want to build the code yourself,
 we have a prebuilt package for the router we are using for development,
 the [GL-iNet AR750S](https://www.gl-inet.com/products/gl-ar750s/).
