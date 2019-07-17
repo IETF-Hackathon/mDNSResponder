@@ -4,9 +4,7 @@ This repository is used for IETF work on DNS-Based Service Discovery, particular
 
 This code is Open Source under the Apache 2.0 license.
 
-This work is the product of the IETF [DNSSD](https://datatracker.ietf.org/wg/dnssd/about/) Working Group.
-
-This work was
+This work is the product of the IETF [DNSSD](https://datatracker.ietf.org/wg/dnssd/about/) Working Group and was
 [presented at the 2019 Apple Worldwide Developer Conference (WWDC) networking session](https://developer.apple.com/videos/play/wwdc2019/713/?time=112).
 
 The specification for the DNS-SD Discovery Proxy can be found in
@@ -18,7 +16,7 @@ Other useful background reading includes
 [DNS Stateful Operations (RFC 8490)](https://tools.ietf.org/html/rfc8490), and
 [DNS Push Notifications](https://tools.ietf.org/html/draft-ietf-dnssd-push).
 
-This document last updated 2019-07-12.
+This document last updated 2019-07-17.
 
 ## Example Scenario
 
@@ -70,13 +68,14 @@ or by suggesting code changes in the form of Git pull requests.
 
 There are four steps to building and operating a DNS-SD Discovery Proxy on your network:
 
-1. Building the Discovery Proxy code or installing a prebuilt package.
+1. Installing a prebuilt package, or building the Discovery Proxy code for yourself.
 
 2. Picking a DNS subdomain name for your advertised services.
 
 3. Configuring and running the Discovery Proxy.
 
-4. Configuring clients with your chosen DNS subdomain name for wide-area discovery.
+4. Configuring clients with your chosen DNS subdomain name for wide-area discovery
+(either manually on the client device itself, or automatically via appropriate network configuration).
 
 ## Option (i) Installing the Prebuilt Package for OpenWrt
 
@@ -86,11 +85,16 @@ If you want to build this code yourself to run on a Mac or Linux machine, skip a
 If you’re using OpenWrt and don’t want to build the code yourself,
 we have a prebuilt package for the router we are using for development,
 the [GL-iNet AR750S](https://www.gl-inet.com/products/gl-ar750s/).
-This package may also work on routers with similar configurations.
+This package may also work on routers with similar hardware.
 
 Connect the WAN port of the AR750S to your existing home network,
 and connect your computer to a LAN port on the AR750S, or its Wi-Fi network.
 Ensure that your AR750S is up to date with the latest firmware from GL-iNet.
+At time of writing, this is version 3.025.
+When you update the firmware, turn off the “Keep Settings” option.
+This will restore your device to factory defaults,
+which ensures that you’re following the setup steps described here
+starting with the same factory default configuration that we did.
 
 Your AR750S should be in the default configuration,
 where it is obtaining an IP address for itself using DHCP on its WAN port (your existing home network),
@@ -103,60 +107,49 @@ If you go to System Preferences and try to add a printer, you’ll not discover 
 
 To install the proxy using the command line, bring up a Terminal window on your Mac and type:
 
-    ssh 192.168.8.1 -l root
+    ssh root@192.168.8.1
 
 Enter the admin password that you configured when you set up the router.
 (To save having to enter the password every time,
 for convenience you can also install your ssh public key on the router using
 [the router’s web user interface](http://192.168.8.1/cgi-bin/luci/admin/system/admin)).
 
-When you are at a command prompt on the router, install the libustream-mbedtls and mbedtls-util packages,
-to enable secure https package downloads:
-
-	opkg update
-	opkg install libustream-mbedtls mbedtls-util
-
-Add a line to the end of /etc/opkg/customfeeds.conf to add our OpenWrt package, as shown below:
+When you are at a command prompt on the router,
+add a line to the end of /etc/opkg/customfeeds.conf to add our OpenWrt package, as shown below:
 
     echo 'src/gz dnssd https://raw.githubusercontent.com/IETF-Hackathon/mDNSResponder/release/OpenWrt/packages/mips_24kc/base' >> /etc/opkg/customfeeds.conf
 
-To fetch the new feed, once again:
+Remove the dnsmasq package, since we’re installing a new DNS server,
+and install the new components we need:
 
     opkg update
+    opkg remove dnsmasq-full
+    opkg install isc-dhcp-server-ipv4 mbedtls-util mbedtls-write dnssd-proxy
 
-Remove the dnsmasq package, since we’re installing a new DNS server:
-
-    opkg remove dnsmasq
-
-Install the ISC DHCP server,
-which is needed to provide DHCP service now that dnsmasq is no longer present,
-the mbedtls-write package, and dnssd-proxy package, which also installs mDNSResponder:
-
-    opkg install isc-dhcp-server-ipv4 mbedtls-write dnssd-proxy
-
-Generate the TLS certificate for your Discovery Proxy:
+Generate the TLS certificate for your Discovery Proxy.
+Generating the key may take as much as 3 minutes.
+Do not interrupt the key generation process.
+It’s just sitting there collecting random data, so it will eventually complete.
 
     cd /etc/dnssd-proxy
     gen_key type=rsa rsa_keysize=4096 filename=server.key
     cert_write selfsign=1 issuer_key=server.key issuer_name=CN=discoveryproxy.home.arpa not_before=20190226000000 not_after=20211231235959 is_ca=1 max_pathlen=0 output_file=server.crt
 
-Generating the key may take as much as 3 minutes.
-Do not interrupt the key generation process.
-It’s just sitting there collecting random data, so it will eventually complete.
-
 Create firewall rules to allow [Multicast DNS](https://tools.ietf.org/html/rfc6762) service discovery on the WAN port:
 
-	uci set glfw.@opening[0].port='5353'
-	uci set glfw.@opening[0].name='mDNS'
-	uci set glfw.@opening[0].proto='UDP'
-	uci set glfw.@opening[0].status='Enabled'
-	uci commit
+    uci add glfw opening
+    uci set glfw.@opening[-1].name='mDNS'
+    uci set glfw.@opening[-1].port='5353'
+    uci set glfw.@opening[-1].proto='UDP'
+    uci set glfw.@opening[-1].status='Enabled'
+    uci commit
 
 Configure the DHCP domain which is communicated to clients:
 
-	uci set dhcp.isc_dhcpd.domain="service.home.arpa"
-	/etc/init.d/dhcpd restart
-	reboot
+    uci set dhcp.isc_dhcpd.domain="service.home.arpa"
+    uci commit
+    /etc/init.d/dhcpd restart
+    reboot
 
 At this point your Discovery Proxy is configured and running.
 In this default configuration your Discovery Proxy is configured
@@ -165,7 +158,7 @@ using [Multicast DNS](https://tools.ietf.org/html/rfc6762) to discover existing 
 on its WAN port (your existing home network).
 
 Once the AR750S completes its reboot,
-if you’re connecting via Wi-Fi confirm that your computer is still associated with the AR750S
+if you’re connecting via Wi-Fi confirm that your computer is still associated with the AR750S,
 and try again to see what your computer can discover now.
 
 If you have network printers on your existing home network,
@@ -178,9 +171,24 @@ when you’re connected to a AR750S LAN port or Wi-Fi.
 
 You now have a working Discovery Proxy, with a default configuration
 that makes services on its upstream WAN port visible to clients on its downstream LAN port or Wi-Fi.
-For more advanced configuration options, or if you want to understand
-more about how this works,
-see
+
+Note: We received one report of problems connecting.
+If you use VPN, and your company has
+configured its internal networks using the same
+[IPv4 private address](https://tools.ietf.org/html/rfc1918)
+range that your home network uses, there can be IPv4 address conflicts,
+where there is more than one device with the same IPv4 address,
+and your client device’s networking code doesn’t know which one you are trying to reach.
+If you find you can discover services but not connect to them,
+turn off VPN and try again to see if that makes a difference.
+(Yet another reason to be using IPv6 instead of IPv4!)
+Likewise, if your existing home network is using the same
+192.168.8/24 IPv4 subnet that the AR750S uses for its own LAN network,
+you’ll have to reconfigure the AR750S to use a
+non-conflicting IPv4 subnet address range.
+
+For more advanced configuration options,
+or if you want to understand more about how this works, see
 [Picking a DNS Subdomain Name for your Advertised Services](#picking-a-dns-subdomain-name-for-your-advertised-services).
 
 ## Option (ii) Building the Discovery Proxy Code Yourself
