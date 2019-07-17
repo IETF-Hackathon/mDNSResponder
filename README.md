@@ -154,12 +154,16 @@ Configure the DHCP domain which is communicated to clients:
 At this point your Discovery Proxy is configured and running.
 In this default configuration your Discovery Proxy is configured
 to offer Discovery Proxy service on the LAN ports (and Wi-Fi),
-using [Multicast DNS](https://tools.ietf.org/html/rfc6762) to discover existing services
-on its WAN port (your existing home network).
+using [Multicast DNS](https://tools.ietf.org/html/rfc6762) to
+discover existing services on its WAN port (your existing home network).
+This makes services on the upstream WAN port
+visible to clients on the downstream LAN ports or Wi-Fi,
+even though the clients are not on the same link or IPv4 subnet
+as the services they are discovering.
 
 Once the AR750S completes its reboot,
 if you’re connecting via Wi-Fi confirm that your computer is still associated with the AR750S,
-and try again to see what your computer can discover now.
+and then try again to see what your computer can discover now.
 
 If you have network printers on your existing home network,
 they will now appear in when you click the “+” button to add a printer
@@ -168,9 +172,6 @@ in the “Printers & Scanners” section of System Preferences.
 If you have machines with ssh enabled that are usually visible
 in “New Remote Connection” in Terminal, they should now be visible
 when you’re connected to a AR750S LAN port or Wi-Fi.
-
-You now have a working Discovery Proxy, with a default configuration
-that makes services on its upstream WAN port visible to clients on its downstream LAN port or Wi-Fi.
 
 Note: We received one report of problems connecting.
 If you use VPN, and your company has
@@ -182,10 +183,11 @@ and your client device’s networking code doesn’t know which one you are tryi
 If you find you can discover services but not connect to them,
 turn off VPN and try again to see if that makes a difference.
 (Yet another reason to be using IPv6 instead of IPv4!)
+
 Likewise, if your existing home network is using the same
-192.168.8/24 IPv4 subnet that the AR750S uses for its own LAN network,
+192.168.8/24 IPv4 subnet that the AR750S uses for its own Wi-Fi/LAN network,
 you’ll have to reconfigure the AR750S to use a
-non-conflicting IPv4 subnet address range.
+non-conflicting IPv4 subnet address range for its Wi-Fi/LAN network.
 
 For more advanced configuration options,
 or if you want to understand more about how this works, see
