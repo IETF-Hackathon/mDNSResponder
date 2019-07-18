@@ -10,13 +10,14 @@ This work is the product of the IETF [DNSSD](https://datatracker.ietf.org/wg/dns
 The specification for the DNS-SD Discovery Proxy can be found in
 [draft-ietf-dnssd-hybrid](https://tools.ietf.org/html/draft-ietf-dnssd-hybrid).
 
-Other useful background reading includes
+Other useful background reading includes the
+[Service Discovery Road Map](https://tools.ietf.org/html/draft-cheshire-dnssd-roadmap),
 [Multicast DNS (RFC 6762)](https://tools.ietf.org/html/rfc6762),
 [DNS-Based Service Discovery (RFC 6763)](https://tools.ietf.org/html/rfc6763),
 [DNS Stateful Operations (RFC 8490)](https://tools.ietf.org/html/rfc8490), and
 [DNS Push Notifications](https://tools.ietf.org/html/draft-ietf-dnssd-push).
 
-This document last updated 2019-07-17.
+This document last updated 2019-07-18.
 
 ## Example Scenario
 
