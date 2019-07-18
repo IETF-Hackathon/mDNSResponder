@@ -4,32 +4,33 @@ This repository is used for IETF work on DNS-Based Service Discovery, particular
 
 This code is Open Source under the Apache 2.0 license.
 
-This work is the product of the IETF [DNSSD](https://datatracker.ietf.org/wg/dnssd/about/) Working Group.
+This work is the product of the IETF [DNSSD](https://datatracker.ietf.org/wg/dnssd/about/) Working Group and was
+[presented at the 2019 Apple Worldwide Developer Conference (WWDC) networking session](https://developer.apple.com/videos/play/wwdc2019/713/?time=112).
 
 The specification for the DNS-SD Discovery Proxy can be found in
 [draft-ietf-dnssd-hybrid](https://tools.ietf.org/html/draft-ietf-dnssd-hybrid).
 
 Other useful background reading includes
-[Multicast DNS (RFC 6762)](https://tools.ietf.org/html/rfc6762) and
-[DNS-Based Service Discovery (RFC 6763)](https://tools.ietf.org/html/rfc6763).
+[Multicast DNS (RFC 6762)](https://tools.ietf.org/html/rfc6762),
+[DNS-Based Service Discovery (RFC 6763)](https://tools.ietf.org/html/rfc6763),
+[DNS Stateful Operations (RFC 8490)](https://tools.ietf.org/html/rfc8490), and
+[DNS Push Notifications](https://tools.ietf.org/html/draft-ietf-dnssd-push).
 
-This work was
-[presented at the 2019 Apple Worldwide Developer Conference (WWDC) networking session](https://developer.apple.com/videos/play/wwdc2019/713/?time=112).
-
-This document last updated 2019-06-13.
+This document last updated 2019-07-17.
 
 ## Example Scenario
 
 A very common configuration in many company networks today is that
 the network printers (which all support AirPrint) are connected to wired Ethernet,
-and the iPhones and iPads (which also support AirPrint) are connected via Wi-Fi,
+and the iPhones and iPads (AirPrint clients) are connected via Wi-Fi,
 which is a different link, and a different IPv4 subnet and/or IPv6 prefix.
-This means that the iPhones and iPads on Wi-Fi can’t discover the AirPrint printers on Ethernet,
+Even though the iPhones and iPads are fully capable of connecting to, and using, the AirPrint printers,
+the problem is that the iPhones and iPads on Wi-Fi can’t discover the AirPrint printers on Ethernet,
 because, by design, link-local [Multicast DNS](https://tools.ietf.org/html/rfc6762)
 does not cross between different links.
-In addition, even if the Wi-Fi Access Point were configured to bridge between
-Ethernet and Wi-Fi, making them one logical link, there are other impediments
-to multicast-based discovery.
+In principle the Wi-Fi Access Point could be configured to bridge between
+Ethernet and Wi-Fi, making them one logical link, but there are a number of impediments
+that make this a bad idea.
 Multicast on Wi-Fi is unreliable, slow, and very wasteful of precious wireless spectrum.
 Because of this, it is becoming increasingly common to limit or disable multicast on Wi-Fi,
 thereby breaking discovery even in cases where you might have expected it to work.
@@ -38,7 +39,7 @@ Installing a DNS-SD Discovery Proxy,
 either on the Wi-Fi Access Point itself,
 or on any other device connected to the wired Ethernet,
 solves this problem.
-With the appropriate automated configuration in place,
+With the appropriate network configuration in place,
 clients on Wi-Fi automatically know to talk to that proxy to perform
 [Multicast DNS](https://tools.ietf.org/html/rfc6762)
 queries on their behalf.
@@ -67,85 +68,152 @@ or by suggesting code changes in the form of Git pull requests.
 
 There are four steps to building and operating a DNS-SD Discovery Proxy on your network:
 
-1. Building the Discovery Proxy code and/or installing a prebuilt package.
+1. Installing a prebuilt package, or building the Discovery Proxy code for yourself.
 
 2. Picking a DNS subdomain name for your advertised services.
 
 3. Configuring and running the Discovery Proxy.
 
-4. Configuring clients with your chosen DNS subdomain name for wide-area discovery.
+4. Configuring clients with your chosen DNS subdomain name for wide-area discovery
+(either manually on the client device itself, or automatically via appropriate network configuration).
 
-## Building the Discovery Proxy code
+## Option (i) Installing the Prebuilt Package for OpenWrt
 
-If you want to build this code to run on a Mac or Linux machine, follow the instructions here.
-If you just want to run the prebuilt package on an OpenWrt device, you can skip ahead to
-“Installing the Prebuilt Package”.
+If you want to build this code yourself to run on a Mac or Linux machine, skip ahead to
+[Option (ii) Building the Discovery Proxy Code Yourself](#option-ii-building-the-discovery-proxy-code-yourself).
+
+If you’re using OpenWrt and don’t want to build the code yourself,
+we have a prebuilt package for the router we are using for development,
+the [GL-iNet AR750S](https://www.gl-inet.com/products/gl-ar750s/).
+This package may also work on routers with similar hardware.
+
+Connect the WAN port of the AR750S to your existing home network,
+and connect your computer to a LAN port on the AR750S, or its Wi-Fi network.
+Ensure that your AR750S is up to date with the latest firmware from GL-iNet.
+At time of writing, this is version 3.025.
+When you update the firmware, turn off the “Keep Settings” option.
+This will restore your device to factory defaults,
+which ensures that you’re following the setup steps described here
+starting with the same factory default configuration that we did.
+
+Your AR750S should be in the default configuration,
+where it is obtaining an IP address for itself using DHCP on its WAN port (your existing home network),
+and sharing that IP address with its LAN (and Wi-Fi) clients by operating its own DHCP server and NAT gateway.
+
+At this point, take a moment to observe that your computer connected to the AR750S’s
+LAN port or Wi-Fi cannot discover anything on the WAN port side.
+If you press Cmd-Shift-K (“New Remote Connection”) in Terminal, you’ll not see any services on the WAN port side.
+If you go to System Preferences and try to add a printer, you’ll not discover any printers on the WAN port side.
+
+To install the proxy using the command line, bring up a Terminal window on your Mac and type:
+
+    ssh root@192.168.8.1
+
+Enter the admin password that you configured when you set up the router.
+(To save having to enter the password every time,
+for convenience you can also install your ssh public key on the router using
+[the router’s web user interface](http://192.168.8.1/cgi-bin/luci/admin/system/admin)).
+
+When you are at a command prompt on the router,
+add a line to the end of /etc/opkg/customfeeds.conf to add our OpenWrt package, as shown below:
+
+    echo 'src/gz dnssd https://raw.githubusercontent.com/IETF-Hackathon/mDNSResponder/release/OpenWrt/packages/mips_24kc/base' >> /etc/opkg/customfeeds.conf
+
+Remove the dnsmasq package, since we’re installing a new DNS server,
+and install the new components we need:
+
+    opkg update
+    opkg remove dnsmasq-full
+    opkg install isc-dhcp-server-ipv4 mbedtls-util mbedtls-write dnssd-proxy
+
+Generate the TLS certificate for your Discovery Proxy.
+Generating the key may take as much as 3 minutes.
+Do not interrupt the key generation process.
+It’s just sitting there collecting random data, so it will eventually complete.
+
+    cd /etc/dnssd-proxy
+    gen_key type=rsa rsa_keysize=4096 filename=server.key
+    cert_write selfsign=1 issuer_key=server.key issuer_name=CN=discoveryproxy.home.arpa not_before=20190226000000 not_after=20211231235959 is_ca=1 max_pathlen=0 output_file=server.crt
+
+Create firewall rules to allow [Multicast DNS](https://tools.ietf.org/html/rfc6762) service discovery on the WAN port:
+
+    uci add glfw opening
+    uci set glfw.@opening[-1].name='mDNS'
+    uci set glfw.@opening[-1].port='5353'
+    uci set glfw.@opening[-1].proto='UDP'
+    uci set glfw.@opening[-1].status='Enabled'
+    uci commit
+
+Configure the DHCP domain which is communicated to clients:
+
+    uci set dhcp.isc_dhcpd.domain="service.home.arpa"
+    uci commit
+    /etc/init.d/dhcpd restart
+    reboot
+
+At this point your Discovery Proxy is configured and running.
+In this default configuration your Discovery Proxy is configured
+to offer Discovery Proxy service on the LAN ports (and Wi-Fi),
+using [Multicast DNS](https://tools.ietf.org/html/rfc6762) to
+discover existing services on its WAN port (your existing home network).
+This makes services on the upstream WAN port
+visible to clients on the downstream LAN ports or Wi-Fi,
+even though the clients are not on the same link or IPv4 subnet
+as the services they are discovering.
+
+Once the AR750S completes its reboot,
+if you’re connecting via Wi-Fi confirm that your computer is still associated with the AR750S,
+and then try again to see what your computer can discover now.
+
+If you have network printers on your existing home network,
+they will now appear in when you click the “+” button to add a printer
+in the “Printers & Scanners” section of System Preferences.
+
+If you have machines with ssh enabled that are usually visible
+in “New Remote Connection” in Terminal, they should now be visible
+when you’re connected to a AR750S LAN port or Wi-Fi.
+
+Note: We received one report of problems connecting.
+If you use VPN, and your company has
+configured its internal networks using the same
+[IPv4 private address](https://tools.ietf.org/html/rfc1918)
+range that your home network uses, there can be IPv4 address conflicts,
+where there is more than one device with the same IPv4 address,
+and your client device’s networking code doesn’t know which one you are trying to reach.
+If you find you can discover services but not connect to them,
+turn off VPN and try again to see if that makes a difference.
+(Yet another reason to be using IPv6 instead of IPv4!)
+
+Likewise, if your existing home network is using the same
+192.168.8/24 IPv4 subnet that the AR750S uses for its own Wi-Fi/LAN network,
+you’ll have to reconfigure the AR750S to use a
+non-conflicting IPv4 subnet address range for its Wi-Fi/LAN network.
+
+For more advanced configuration options,
+or if you want to understand more about how this works, see
+[Picking a DNS Subdomain Name for your Advertised Services](#picking-a-dns-subdomain-name-for-your-advertised-services).
+
+## Option (ii) Building the Discovery Proxy Code Yourself
 
 Because this code is targeted at small embedded devices, it uses mbedtls.
 If you don’t already have mbedtls installed, you can get it using the following commands:
 
 	git clone --recursive https://github.com/ARMmbed/mbedtls
-	make
+	cd mbedtls
+	make no_test
 	sudo make install
 
-The tests need Python to be built and Perl to be run. If you don't have one of them installed, you can skip building the tests with:
-
-	make no_test
-
-Clone this Git repository:
+Once you have mbedtls installed, change directory to the location where you want
+your copy of the mDNSResponder code, clone this Git repository, and build the code:
 
 	git clone --branch release https://github.com/IETF-Hackathon/mDNSResponder.git
-
-Within your cloned copy of the repository,
-change directory to “mDNSResponder/ServiceRegistration” and type “make”.
+	cd mDNSResponder/mDNSResponder/ServiceRegistration
+	make
 
 In the “build” subdirectory this will create the dnssd-proxy executable.
-
-## Installing the Prebuilt Package for OpenWrt
-
-At the moment prebuilt packages are only available for the router we are using internally for development,
-the [GL-iNet AR750S](https://www.gl-inet.com/products/gl-ar750s/).
-These packages may also work on routers with similar configurations.
-
-There are two ways to install the proxy on an OpenWrt device.
-These instructions explain how to do it using the command line;
-we will produce a video that shows how to do it using the user interface.
-
-To install the proxy using the command line, bring up a Terminal window on your Mac, which must be
-connected to the OpenWrt device.  The OpenWrt device must have a working Internet connection.
-To connect to the router, type:
-
-    ssh 192.168.8.1 -l root
-
-Then enter the admin password that you configured when you set up the router.
-You can also install an ssh key on the router using
-[the router’s web user interface](http://192.168.8.1/cgi-bin/luci/admin/system/admin).
-
-When you are at a command prompt on the router, install the libustream-mbedtls and mbedtls-util packages,
-to enable secure https package downloads:
-
-	opkg update
-	opkg install libustream-mbedtls mbedtls-util
-
-Now add a line to the end of /etc/opkg/customfeeds.conf to add our OpenWrt package, as shown below:
-
-    echo 'src/gz dnssd https://raw.githubusercontent.com/IETF-Hackathon/mDNSResponder/release/OpenWrt/packages/mips_24kc/base' >> /etc/opkg/customfeeds.conf
-
-To fetch the new feed, once again:
-
-    opkg update
-
-Now remove the dnsmasq package, since we’re installing a new DNS server:
-
-    opkg remove dnsmasq
-
-Now install the ISC DHCP server,
-which is needed to provide DHCP service now that dnsmasq is no longer present,
-the mbedtls-write package, and dnssd-proxy package, which also installs the mDNSResponder package:
-
-    opkg install isc-dhcp-server-ipv4 mbedtls-write dnssd-proxy
-
-At this point you are ready to continue with configuring your Discovery Proxy.
+Now you have built the code,
+continue below with
+[Picking a DNS Subdomain Name for your Advertised Services](#picking-a-dns-subdomain-name-for-your-advertised-services).
 
 ## Picking a DNS Subdomain Name for your Advertised Services
 
@@ -153,7 +221,7 @@ DNS-Based Service Discovery, is based, naturally enough, on DNS domain names.
 
 Two DNS domain names are involved here,
 the DNS name for the advertised link, and
-the DNS hostname for the Discovery Proxy doing the advertising.
+the DNS hostname for the Discovery Proxy performing the discovery on that advertised link.
 These two names are different.
 
 For each physical (or virtual) link
@@ -181,7 +249,8 @@ the Discovery Proxy device needs a DNS hostname, to go in the delegating DNS “
 You can run a Discovery Proxy without a DNS hostname,
 but in this case you will not be able to use DNS delegation,
 and clients will have to be configured with the IP address of the Discovery Proxy,
-as explained below in the section “Manually adding a DNS resolver address”.
+as explained below in the section
+[Manually adding a DNS resolver address](#manually-adding-a-dns-resolver-address-on-the-client-for-testing).
 If you don’t have a DNS hostname for your Discovery Proxy device,
 then where these instructions talk about the hostname, you can use the name
 “discoveryproxy.home.arpa” instead.
@@ -201,9 +270,9 @@ as the name for the link on which the Discovery Proxy resides.
 To recap:
 two DNS domain names are involved here,
 the DNS name for the advertised link, and
-the DNS hostname for the Discovery Proxy doing the advertising.
+the DNS hostname for the Discovery Proxy performing the discovery on that advertised link.
 These two names are different.
-One names the advertised link; the other names the device doing the advertising.
+One names the advertised link; the other names the device making that advertised link visible to clients.
 By default the names for testing are:
 
 	Link name: service.home.arpa
@@ -223,16 +292,6 @@ On a linux or MacOS install, you will run the gen_key and cert_write commands:
     $HOME/mbedtls/programs/x509/cert_write selfsign=1 issuer_key=server.key issuer_name=CN=discoveryproxy.home.arpa not_before=20190226000000 not_after=20211231235959 is_ca=1 max_pathlen=0 output_file=server.crt
     sudo mkdir /etc/dnssd-proxy
     sudo mv server.key server.crt /etc/dnssd-proxy
-
-On OpenWrt, the utilities are installed, so invoke them as follows, again changing discoveryproxy.home.arpa to the correct hostname:
-
-    cd /etc/dnssd-proxy
-    gen_key type=rsa rsa_keysize=4096 filename=server.key
-    cert_write selfsign=1 issuer_key=server.key issuer_name=CN=discoveryproxy.home.arpa not_before=20190226000000 not_after=20211231235959 is_ca=1 max_pathlen=0 output_file=server.crt
-
-On OpenWrt, generating the key may take as much as 3 minutes.
-Do not interrupt the key generation process.
-It’s just sitting there collecting random data, so it will eventually complete.
 
 The dnssd-proxy operation is controlled by the file
 
@@ -257,9 +316,6 @@ replace “service.home.arpa” with that subdomain name.
 
 If your Discovery Proxy device has a DNS hostname,
 replace “discoveryproxy.home.arpa” with that DNS hostname.
-This is not necessary when running on the OpenWrt router,
-because the router automatically configures its hostname
-appropriately.
 
 Replace “203.0.113.123” with the actual IP address of your Discovery Proxy device.
 
@@ -267,17 +323,6 @@ Once you have the key, the certificate, and the configuration file in place,
 on Linux or Mac run the dnssd-proxy executable in a Terminal window.
 You should see some lines beginning “hardwired_add”,
 followed by “waiting” when the dnssd-proxy is ready to start processing requests.
-
-On OpenWrt on the AR-750S, in order to enable
-service discovery on the WAN port, type the following:
-
-	uci set glfw.@opening[0].port='5353'
-	uci set glfw.@opening[0].name='mDNS'
-	uci set glfw.@opening[0].proto='UDP'
-	uci set glfw.@opening[0].status='Enabled'
-	uci commit
-
-Once complete, type “reboot” to restart the router.
 
 ## Configuring Clients with Your Chosen DNS Subdomain Name for Wide-Area Discovery
 
@@ -304,11 +349,6 @@ No manual client configuration is required.
 
 There are other ways that automatic configuration can be performed, described in
 [Section 11 of RFC 6763](https://tools.ietf.org/html/rfc6763#section-11).
-
-On OpenWrt, the domain can be configured as follows:
-
-	uci set dhcp.isc_dhcpd.domain="service.home.arpa"
-	/etc/init.d/dhcpd restart
 
 If you are using the default configuration as we have described earlier, this will
 configure the correct domain; if you are using a different domain, that domain is
