@@ -104,8 +104,9 @@ At this point, take a moment to observe that your computer connected to the AR75
 LAN port or Wi-Fi cannot discover anything on the WAN port side.
 If you press Cmd-Shift-K (“New Remote Connection”) in Terminal, you’ll not see any services on the WAN port side.
 If you go to System Preferences and try to add a printer, you’ll not discover any printers on the WAN port side.
+If you run “Image Capture”, you’ll not discover any scanners on the WAN port side.
 
-To install the proxy using the command line, bring up a Terminal window on your Mac and type:
+To install the Discovery Proxy on your AR750S, bring up a Terminal window on your Mac and type:
 
     ssh root@192.168.8.1
 
@@ -165,13 +166,16 @@ Once the AR750S completes its reboot,
 if you’re connecting via Wi-Fi confirm that your computer is still associated with the AR750S,
 and then try again to see what your computer can discover now.
 
-If you have network printers on your existing home network,
-they will now appear in when you click the “+” button to add a printer
-in the “Printers & Scanners” section of System Preferences.
-
 If you have machines with ssh enabled that are usually visible
 in “New Remote Connection” in Terminal, they should now be visible
-when you’re connected to a AR750S LAN port or Wi-Fi.
+when you’re connected to an AR750S LAN port or Wi-Fi.
+
+If you have network printers on your existing home network,
+they should now appear in when you click the “+” button to add a printer
+in the “Printers & Scanners” section of System Preferences.
+
+If you have a scanner on your existing home network,
+it should now appear when you run the “Image Capture” app.
 
 Note: We received one report of problems connecting.
 If you use VPN, and your company has
@@ -211,8 +215,7 @@ your copy of the mDNSResponder code, clone this Git repository, and build the co
 	make
 
 In the “build” subdirectory this will create the dnssd-proxy executable.
-Now you have built the code,
-continue below with
+Now you have built the code, continue below with
 [Picking a DNS Subdomain Name for your Advertised Services](#picking-a-dns-subdomain-name-for-your-advertised-services).
 
 ## Picking a DNS Subdomain Name for your Advertised Services
@@ -266,6 +269,7 @@ For testing, it is okay if this link subdomain name is not formally delegated to
 If you don’t have a suitable domain name you can use,
 then you can use “service.home.arpa”
 as the name for the link on which the Discovery Proxy resides.
+The “home.arpa” domain is reserved for this kind of local use.
 
 To recap:
 two DNS domain names are involved here,
@@ -332,6 +336,8 @@ This Discovery Proxy, built using
 can be used with the current Apple developer seeds of iOS 13 and macOS Catalina.
 Older versions of iOS and macOS do not include support for
 DNS Stateful Operations and DNS Push Notifications.
+Older versions of iOS and macOS will work with the Discovery Proxy
+but they will not get immediate updates when data changes.
 
 The client needs to be told in which DNS domains to look for services,
 in addition to “local”
@@ -359,6 +365,7 @@ get the new setting.
 In an operational network, no client configuration is required.
 It is all completely automatic.
 However, for testing, unless you have the necessary DNS records created,
+as described here,
 you can simulate this via some manual client configuration.
 
 ### Manually adding a DNS search domain on the client, for testing
