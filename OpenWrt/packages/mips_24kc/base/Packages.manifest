@@ -1,30 +1,32 @@
 Package: dns-sd
 Version: 5
-Depends: libc, libc, libmbedtls
+Depends: libc, libc, libmbedtls2.14.1-1
 Source: package/network/services/dns-sd
+SourceName: dns-sd
 License: Apache-2.0
 Section: net
 Maintainer: Ted Lemon <mellon@fugue.com>
 Architecture: mips_24kc
-Installed-Size: 28814
+Installed-Size: 28586
 Filename: dns-sd_5_mips_24kc.ipk
-Size: 29657
-SHA256sum: ec52232879bdad3a1d83f7df23199453ca3f4641416bd393b15991c3388c8581
+Size: 29434
+SHA256sum: 623bf8d12a955bf9a948540e40985a858b114d18db39cb7e27e27990f4537c22
 Description:  mDNSResponder is the Apple implementation of a DNSSD service discovery agent.  
  dns-sd is a command line tool for querying the agent when it is running.
 
 Package: dnssd-proxy
 Version: 5
-Depends: libc, libc, libmbedtls, mDNSResponder
+Depends: libc, libc, libmbedtls2.14.1-1, mDNSResponder
 Source: package/network/services/dnssd-proxy
+SourceName: dnssd-proxy
 License: Apache-2.0
 Section: net
 Maintainer: Ted Lemon <mellon@fugue.com>
 Architecture: mips_24kc
-Installed-Size: 38848
+Installed-Size: 40594
 Filename: dnssd-proxy_5_mips_24kc.ipk
-Size: 39747
-SHA256sum: 926f954f63106cccff07478134b0a3ae820e6c1b1b9c7de583f643c96ad66ba9
+Size: 41454
+SHA256sum: 8bb78b4f047857037ade0e010c510773a6533ba45ce8c3b3ef3e732f86c465b0
 Description:  DNSSD-Proxy is a reference implementation of the IETF DNS Service Discovery Proxy.
  The Discovery Proxy proxies multicast DNS service from one network to another using
  the DNS protocol.   This allows devices on one link to discover services on another
@@ -32,32 +34,33 @@ Description:  DNSSD-Proxy is a reference implementation of the IETF DNS Service 
 
 Package: mDNSResponder
 Version: 5
-Depends: libc, libc, libmbedtls
+Depends: libc, libc, libmbedtls2.14.1-1
 Source: package/network/services/mDNSResponder
+SourceName: mDNSResponder
 License: Apache-2.0
 Section: net
 Maintainer: Ted Lemon <mellon@fugue.com>
 Architecture: mips_24kc
-Installed-Size: 195369
+Installed-Size: 195345
 Filename: mDNSResponder_5_mips_24kc.ipk
-Size: 196187
-SHA256sum: b736e5231bcf5e5a31fc7a324690af1727614ee0dc73fb4cce7a08d878982986
+Size: 196175
+SHA256sum: c38ee37c5e2647045c4e8beb29015f285f518f05ea6dcd305965cb079d7ee3dc
 Description:  mDNSResponder is the Apple implementation of a DNSSD service discovery agent.   It
  can be used to discover services both on the local link using the Multicast DNS
  protocol, and on both local and non-local links using the DNS protocol.
 
 Package: mbedtls-write
 Version: 2.14.1-1
-Depends: libc, libmbedtls
+Depends: libc, libmbedtls2.14.1-1
 Source: package/libs/mbedtls
+SourceName: mbedtls-write
 License: GPL-2.0+
 Section: cert_write
 Architecture: mips_24kc
-Installed-Size: 5721
+Installed-Size: 5723
 Filename: mbedtls-write_2.14.1-1_mips_24kc.ipk
-Size: 6532
-SHA256sum: 1af617e72113dfdb31d40cb97ae9bc950807bd37662cd5875c458d0d97151dc2
+Size: 6537
+SHA256sum: 85584debb4d01f143b7fed8d17031c6b008f61f0f20aa48aa4cf856846a0b033
 Description:  The aim of the mbedtls project is to provide a quality, open-source
  cryptographic library written in C and targeted at embedded systems.
  This package contains an mbedtls helper program to self-sign a cert.
-
