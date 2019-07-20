@@ -284,13 +284,13 @@ dp_query_add_data_to_response(dnssd_query_t *query, const char *fullname,
     }
     // Don't send A records for 127.* nor AAAA records for ::1
     if (rrtype == dns_rrtype_a && rdlen == 4) {
-        struct in_addr addr;
-        addr = *(struct in_addr *)rdata;
-        if (IN_LOOPBACK(&addr)) {
+        // Should use IN_LINKLOCAL and IN_LOOPBACK macros here, but for some reason they are not present on
+        // OpenWRT.
+        if (rd[0] == 127) {
             INFO("Eliding localhost response for %s: %d.%d.%d.%d", fullname, rd[0], rd[1], rd[2], rd[3]);
             return;
         }
-        if (IN_LINKLOCAL(&addr)) {
+        if (rd[0] == 169 && rd[1] == 254) {
             INFO("Eliding link-local response for %s: %d.%d.%d.%d", fullname, rd[0], rd[1], rd[2], rd[3]);
             return;
         }
@@ -452,12 +452,12 @@ void dnssd_hardwired_lbdomains_setup(dns_towire_state_t *towire, dns_wire_t *wir
                 int space = sizeof name;
                 int i;
 
-                if (IN_LOOPBACK(&ifaddr->addr.sin.sin_addr)) {
+                if (address[0] == 127) {
                     INFO("Skipping IPv4 loopback address on %s (%s)", addr_domain->domain, interface->name);
                     continue;
                 }
 
-                if (IN_LINKLOCAL(&ifaddr->addr.sin.sin_addr)) {
+                if (address[0] == 169 && address[1] == 254) {
                     INFO("Skipping IPv4 link local address on %s (%s)", addr_domain->domain, interface->name);
                     continue;
                 }
@@ -476,6 +476,7 @@ void dnssd_hardwired_lbdomains_setup(dns_towire_state_t *towire, dns_wire_t *wir
                     }
                 }
 
+#if 0
                 INFO("Adding PTRs for %s", name);
                 for (interface_domain = served_domains; interface_domain != NULL; interface_domain = interface_domain->next) {
                     if (interface_domain->interface == NULL || interface_domain->interface->ifindex == 0) {
@@ -486,12 +487,13 @@ void dnssd_hardwired_lbdomains_setup(dns_towire_state_t *towire, dns_wire_t *wir
                     dns_full_name_to_wire(NULL, towire, interface_domain->domain);
                     dnssd_hardwired_add(ipv4, name, ipv4->domain_ld, towire->p - wire->data, wire->data, dns_rrtype_ptr);
                 }
+#endif
             } else if (ifaddr->addr.sa.sa_family == AF_INET6) {
                 uint8_t *address = (uint8_t *)&(ifaddr->addr.sin6.sin6_addr);
                 uint8_t *mask = (uint8_t *)&(ifaddr->mask.sin6.sin6_addr);
                 char *bp;
                 int space = sizeof name;
-                int i, word, ishift, shift;
+                int i, word, shift;
 
                 if (IN6_IS_ADDR_LOOPBACK(&ifaddr->addr.sin6.sin6_addr)) {
                     INFO("Skipping IPv6 link local address on %s (%s)", addr_domain->domain, interface->name);
@@ -510,7 +512,6 @@ void dnssd_hardwired_lbdomains_setup(dns_towire_state_t *towire, dns_wire_t *wir
                                 (address[word] >> shift) & (mask[word] >> shift) & 15);
                         bp += strlen(bp);
                     }
-                    ishift = 0;
                 }
                 if (ip6 == NULL) {
                     ip6 = new_served_domain(NULL, "ip6.arpa.");
@@ -563,10 +564,12 @@ dnssd_hardwired_setup(void)
         }
         
         // Browsing pointers...
+#if 0
         RESET;
         dns_full_name_to_wire(NULL, &towire, sdt->domain);
         dnssd_hardwired_add(sdt, "b._dns-sd._udp", sdt->domain_ld, towire.p - wire.data, wire.data, dns_rrtype_ptr);
         dnssd_hardwired_add(sdt, "lb._dns-sd._udp", sdt->domain_ld, towire.p - wire.data, wire.data, dns_rrtype_ptr);
+#endif
 
         // SRV
         // _dns-llq._udp
