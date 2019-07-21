@@ -140,7 +140,6 @@ struct TCPListener_struct
     TCPSocketFlags socketFlags;
 };
     
-#define uDNS_SERVERS_FILE "/etc/resolv.conf"
 extern int ParseDNSServers(mDNS *m, const char *filePath);
 extern mStatus mDNSPlatformPosixRefreshInterfaceList(mDNS *const m);
 extern mDNSs32 FileWatcherIdle(mDNS *m, mDNSs32 nextEvent);
