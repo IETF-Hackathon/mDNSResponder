@@ -1881,23 +1881,21 @@ config_file_verb_t dp_verbs[] = {
 void
 dnssd_push_setup()
 {
-    listener[num_listeners] = setup_listener_socket(AF_INET, IPPROTO_TCP, false,
-                                                    tcp_port, NULL, NULL, "IPv4 DNS Push Listener", dns_input, connected, 0);
+    listener[num_listeners] = setup_listener_socket(AF_INET, IPPROTO_TCP, true,
+                                                    tls_port, NULL, NULL, "IPv4 DNS Push Listener", dns_input, connected, 0);
     if (listener[num_listeners] == NULL) {
-        ERROR("TCPv4 listener: fail.");
+        ERROR("IPv4 DNS Push listener: fail.");
         return;
-    } else {
-        num_listeners++;
     }
+    num_listeners++;
     
-    listener[num_listeners] = setup_listener_socket(AF_INET6, IPPROTO_TCP, false,
-                                                    tcp_port, NULL, NULL, "IPv6 DNS Push Listener", dns_input, connected, 0);
+    listener[num_listeners] = setup_listener_socket(AF_INET6, IPPROTO_TCP, true,
+                                                    tls_port, NULL, NULL, "IPv6 DNS Push Listener", dns_input, connected, 0);
     if (listener[num_listeners] == NULL) {
-        ERROR("TCPv6 listener: fail.");
+        ERROR("IPv6 DNS Push listener: fail.");
         return;
-    } else {
-        num_listeners++;
     }
+    num_listeners++;
 
     dnssd_hardwired_push_setup();
 }
@@ -1912,6 +1910,7 @@ dnssd_push_setup()
 void
 keyprogram_start(const char *program, subproc_callback_t callback, ...)
 {
+#define MAX_SUBPROC_VARS 3
     size_t lens[MAX_SUBPROC_VARS];
     char *vars[MAX_SUBPROC_VARS];
     int num_vars = 0;
@@ -1933,11 +1932,6 @@ keyprogram_start(const char *program, subproc_callback_t callback, ...)
 
         if (argc >= MAX_SUBPROC_ARGS) {
             ERROR("keyprogram_start: too many arguments.");
-        fail:
-            for (i = 0; i < num_vars; i++) {
-                free(vars[i]);
-            }
-            return;
         }
 
         if (value == NULL) {
@@ -1945,13 +1939,13 @@ keyprogram_start(const char *program, subproc_callback_t callback, ...)
         } else {
             if (num_vars >= MAX_SUBPROC_VARS) {
                 ERROR("Too many variable args: %s %s", vname, value);
-                goto fail;
+                goto out;
             }
             lens[num_vars] = strlen(vname) + strlen(value) + 2;
             vars[num_vars] = malloc(lens[num_vars]);
             if (vars[num_vars] == NULL) {
                 ERROR("No memory for variable key=value %s %s", vname, value);
-                goto fail;
+                goto out;
             }
             snprintf(vars[num_vars], lens[num_vars], "%s=%s", vname, value);
             arg = vars[num_vars];
@@ -1960,7 +1954,11 @@ keyprogram_start(const char *program, subproc_callback_t callback, ...)
         argv[argc++] = arg;
     }
     argv[argc] = NULL;
-    ioloop_subproc(program, vars, num_vars, argv, argc, callback);
+    ioloop_subproc(program, argv, argc, callback);
+out:
+    for (i = 0; i < num_vars; i++) {
+        free(vars[i]);
+    }
 }
 
 bool
@@ -2016,10 +2014,10 @@ keyfile_finished_callback(subproc_t *subproc, int status, const char *error)
             INFO("Keyfile generation completed.");
 
             // XXX dates need to not be constant!!!
-            keyprogram_start("/usr/bin/cert_write", certfile_finished_callback,
-                             "selfsign=1", NULL, "issuer_key", tls_key_filename, "issuer_name", my_name,
+            keyprogram_start(CERTWRITE_PROGRAM, certfile_finished_callback,
+                             "selfsign=1", NULL, "issuer_key", tls_key_filename, "issuer_name=CN", my_name,
                              "not_before=20190226000000", NULL, "not_after=20211231235959", NULL, "is_ca=1", NULL,
-                             "max_pathlen=0", NULL, "output_file", tls_cert_filename);
+                             "max_pathlen=0", NULL, "output_file", tls_cert_filename, NULL);
     }
 
 }
@@ -2065,10 +2063,10 @@ main(int argc, char **argv)
     // The tls_fail flag allows us to run the proxy in such a way that TLS connections will fail.
     // This is never what you want in production, but is useful for testing.
     if (!tls_fail) {
-        if (!access(tls_key_filename, R_OK)) {
-            keyprogram_start("/usr/bin/gen_key", keyfile_finished_callback,
+        if (access(tls_key_filename, R_OK) < 0) {
+            keyprogram_start(GENKEY_PROGRAM, keyfile_finished_callback,
                              "type=rsa", NULL, "rsa_keysize=4096", NULL, "filename", tls_key_filename, NULL);
-        } else if (!access(tls_cert_filename, R_OK)) {
+        } else if (access(tls_cert_filename, R_OK) < 0) {
             keyfile_finished_callback(NULL, 0, NULL);
         } else if (srp_tls_server_init(NULL, tls_cert_filename, tls_key_filename)) {
             // If we've been able to set up TLS, then we can do DNS push.
@@ -2080,15 +2078,6 @@ main(int argc, char **argv)
         return 1;
     }
 
-
-    listener[num_listeners] = setup_listener_socket(AF_INET, IPPROTO_TCP, true,
-                                                    tls_port, NULL, NULL, "IPv4 DNS TLS Listener", dns_input, connected, 0);
-    if (listener[num_listeners] == NULL) {
-        ERROR("TLS4 listener: fail.");
-        return 1;
-    }
-    num_listeners++;
-    
     for (i = 0; i < num_listen_addrs; i++) {
         listener[num_listeners] = setup_listener_socket(AF_UNSPEC, IPPROTO_UDP, false, udp_port, listen_addrs[i], NULL,
                                                         "DNS UDP Listener", dns_input, 0, 0);
@@ -2099,13 +2088,23 @@ main(int argc, char **argv)
         num_listeners++;
     }
     
-    listener[num_listeners] = setup_listener_socket(AF_INET6, IPPROTO_TCP, true,
-                                                    tls_port, NULL, NULL, "IPv6 DNS TLS Listener", dns_input, connected, 0);
+    listener[num_listeners] = setup_listener_socket(AF_INET, IPPROTO_TCP, false,
+                                                    tcp_port, NULL, NULL, "IPv4 TCP DNS Listener", dns_input, connected, 0);
     if (listener[num_listeners] == NULL) {
-        ERROR("TLS6 listener: fail.");
+        ERROR("TCPv4 listener: fail.");
         return 1;
+    } else {
+        num_listeners++;
     }
-    num_listeners++;
+    
+    listener[num_listeners] = setup_listener_socket(AF_INET6, IPPROTO_TCP, false,
+                                                    tcp_port, NULL, NULL, "IPv6 TCP DNS Listener", dns_input, connected, 0);
+    if (listener[num_listeners] == NULL) {
+        ERROR("TCPv6 listener: fail.");
+        return 1;
+    } else {
+        num_listeners++;
+    }
 
     // If we haven't been given any addresses to listen on, listen on an IPv4 address and an IPv6 address.
     if (num_listen_addrs == 0) {
