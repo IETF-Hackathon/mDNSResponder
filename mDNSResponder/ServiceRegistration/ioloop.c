@@ -45,6 +45,7 @@
 #include "srp-tls.h"
 
 io_t *ios;
+subproc_t *subprocesses;
 int64_t ioloop_now;
 
 #ifdef USE_KQUEUE
@@ -199,6 +200,16 @@ drop_writer(io_t *io)
 #endif // USE_EPOLL
 }
 
+static void
+subproc_free(subproc_t *subproc)
+{
+    int i;
+    for (i = 0; i < subproc->argc; i++) {
+        free(subproc->argv[i]);
+    }
+    free(subproc);
+}
+
 bool
 ioloop_init(void)
 {
@@ -286,6 +297,29 @@ ioloop_events(int64_t timeout_when)
 #endif
         }
         iop = &io->next;
+    }
+
+    while (true) {
+        int status;
+        pid_t pid;
+        pid = waitpid(-1, &status, WNOHANG);
+        if (pid <= 0) {
+            break;
+        }
+        subproc_t **sp, *subproc;
+        for (sp = &subprocesses; (*sp) != NULL; sp = &(*sp)->next) {
+            subproc = *sp;
+            if (subproc->pid == pid) {
+                if (!WIFSTOPPED(status)) {
+                    *sp = subproc->next;
+                }
+                subproc->callback(subproc, status, NULL);
+                if (!WIFSTOPPED(status)) {
+                    subproc_free(subproc);
+                    break;
+                }
+            }
+        }
     }
 
 #ifdef USE_SELECT
@@ -1084,6 +1118,58 @@ bool map_interface_addresses(void *context, interface_callback_t callback)
         ;
     *ip = new_ifaddrs;
     return true;
+}
+
+// Invoke the specified executable with the specified arguments.   Call callback when it exits.
+// All failures are reported through the callback.
+subproc_t *
+ioloop_subproc(const char *exepath, char *NULLABLE *argv, int argc, subproc_callback_t callback)
+{
+    subproc_t *subproc = calloc(1, sizeof *subproc);
+    int i;
+    pid_t pid;
+
+    if (subproc == NULL) {
+        callback(NULL, 0, "out of memory");
+        return NULL;
+    }
+    if (argc > MAX_SUBPROC_ARGS) {
+        callback(NULL, 0, "too many subproc args");
+        subproc_free(subproc);
+        return NULL;
+    }
+
+    subproc->argv[0] = strdup(exepath);
+    if (subproc->argv[0] == NULL) {
+        subproc_free(subproc);
+        return NULL;
+    }
+    subproc->argc++;
+    for (i = 0; i < argc; i++) {
+        subproc->argv[i + 1] = strdup(argv[i]);
+        if (subproc->argv[i + 1] == NULL) {
+            subproc_free(subproc);
+            return NULL;
+        }
+        subproc->argc++;
+    }
+    pid = vfork();
+    if (pid == 0) {
+        execv(exepath, subproc->argv);
+        _exit(errno);
+        // NOTREACHED
+    }
+    if (pid == -1) {
+        callback(subproc, 0, strerror(errno));
+        subproc_free(subproc);
+        return NULL;
+    }
+
+    subproc->callback = callback;
+    subproc->pid = pid;
+    subproc->next = subprocesses;
+    subprocesses = subproc;
+    return subproc;
 }
 
 // Local Variables:

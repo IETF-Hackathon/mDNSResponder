@@ -1,4 +1,4 @@
-/* ioloop.c
+/* ioloop.h
  *
  * Copyright (c) 2018-2019 Apple Computer, Inc. All rights reserved.
  *
@@ -47,8 +47,10 @@ struct message {
     dns_wire_t wire;
 };
 
+
 typedef struct dso_transport comm_t;
 typedef struct io io_t;
+typedef struct subproc subproc_t;
 typedef void (*io_callback_t)(io_t *NONNULL io);
 typedef void (*comm_callback_t)(comm_t *NONNULL comm);
 typedef void (*disconnect_callback_t)(comm_t *NONNULL comm, int error);
@@ -60,6 +62,7 @@ enum interface_address_change { interface_address_added, interface_address_delet
 typedef void (*interface_callback_t)(void *NULLABLE context, const char *NONNULL name,
                                      const addr_t *NONNULL address, const addr_t *NONNULL netmask, int index,
                                      enum interface_address_change event_type);
+typedef void (*subproc_callback_t)(subproc_t *NULLABLE subproc, int status, const char *NULLABLE error);
 
 typedef struct tls_context tls_context_t;
 
@@ -105,6 +108,15 @@ struct dso_transport {
     bool is_multicast: 1;
 };
 
+#define MAX_SUBPROC_ARGS 20
+struct subproc {
+    struct subproc *NULLABLE next;
+    subproc_callback_t NONNULL callback;
+    char *NULLABLE argv[MAX_SUBPROC_ARGS + 1];
+    int argc;
+    pid_t pid;
+};
+
 extern int64_t ioloop_now;
 int getipaddr(addr_t *NONNULL addr, const char *NONNULL p);
 int64_t ioloop_timenow(void);
@@ -125,6 +137,7 @@ comm_t *NULLABLE connect_to_host(addr_t *NONNULL remote_address, bool tls,
                                  disconnect_callback_t NONNULL disconnected,
                                  void *NONNULL context);
 bool map_interface_addresses(void *NULLABLE context, interface_callback_t NONNULL callback);
+subproc_t *NULLABLE ioloop_subproc(const char *NONNULL exepath, char *NULLABLE *NONNULL argv, int argc, subproc_callback_t NULLABLE callback);
 #endif
 
 // Local Variables:
