@@ -17,7 +17,7 @@ Other useful background reading includes the
 [DNS Stateful Operations (RFC 8490)](https://tools.ietf.org/html/rfc8490), and
 [DNS Push Notifications](https://tools.ietf.org/html/draft-ietf-dnssd-push).
 
-This document last updated 2019-07-18.
+This document last updated 2019-07-22.
 
 ## Example Scenario
 
@@ -85,12 +85,12 @@ If you want to build this code yourself to run on a Mac or Linux machine, skip a
 
 If you’re using OpenWrt and don’t want to build the code yourself,
 we have a prebuilt package for the router we are using for development,
-the [GL-iNet AR750S](https://www.gl-inet.com/products/gl-ar750s/).
+the [GL.iNet AR750S](https://www.gl-inet.com/products/gl-ar750s/).
 This package may also work on routers with similar hardware.
 
 Connect the WAN port of the AR750S to your existing home network,
 and connect your computer to a LAN port on the AR750S, or its Wi-Fi network.
-Ensure that your AR750S is up to date with the latest firmware from GL-iNet.
+Ensure that your AR750S is up to date with the latest firmware from GL.iNet.
 At time of writing, this is version 3.025.
 When you update the firmware, turn off the “Keep Settings” option.
 This will restore your device to factory defaults,
