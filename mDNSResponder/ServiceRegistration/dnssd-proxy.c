@@ -44,6 +44,7 @@
 #include <sys/types.h>
 #include <ifaddrs.h>
 #include <net/if.h>
+#include <stdarg.h>
 
 #include "dns_sd.h"
 #include "srp.h"
@@ -71,6 +72,8 @@ int num_publish_addrs = 0;
 char *tls_cacert_filename = NULL;
 char *tls_cert_filename = "/etc/dnssd-proxy/server.crt";
 char *tls_key_filename = "/etc/dnssd-proxy/server.key";
+comm_t *listener[4 + MAX_ADDRS];
+int num_listeners = 0;
 
 typedef struct hardwired hardwired_t;
 struct hardwired {
@@ -404,11 +407,24 @@ void
 dnssd_hardwired_add(served_domain_t *sdt,
                     const char *name, const char *domain, size_t rdlen, uint8_t *rdata, uint16_t type)
 {
-    hardwired_t *hp;
+    hardwired_t *hp, **hrp;
     int namelen = strlen(name);
-    size_t total = (sizeof *hp) + rdlen + namelen * 2 + 2 + strlen(namelen == 0 ? sdt->domain : sdt->domain_ld);
+    size_t total = sizeof *hp;
+    uint8_t *trailer;
+    total += rdlen; // Space for RDATA
+    total += namelen; // Space for name
+    total += 1; // NUL
+    total += namelen;// space for FQDN
+    total += strlen(domain);
+    total += 1; // NUL
 
-    hp = calloc(1, total);
+    hp = calloc(1, total + 4);
+    if (hp == NULL) {
+        ERROR("no memory for %s %s", name, domain);
+        return;
+    }
+    trailer = ((uint8_t *)hp) + total;
+    memcpy(trailer, "abcd", 4);
     hp->rdata = (uint8_t *)(hp + 1);
     hp->rdlen = rdlen;
     memcpy(hp->rdata, rdata, rdlen);
@@ -423,10 +439,27 @@ dnssd_hardwired_add(served_domain_t *sdt,
     }
     if (hp->fullname + strlen(hp->fullname) + 1 != (char *)hp + total) {
         ERROR("%p != %p", hp->fullname + strlen(hp->fullname) + 1, ((char *)hp) + total);
+        return;
+    }
+    if (memcmp(trailer, "abcd", 4)) {
+        ERROR("ran off the end.");
+        return;
     }
     hp->type = type;
-    hp->next = sdt->hardwired_responses;
-    sdt->hardwired_responses = hp;
+    hp->next = NULL;
+
+    // Store this new hardwired_t at the end of the list unless a hardwired_t with the same name
+    // is already on the list.   If it is, splice it in.
+    for (hrp = &sdt->hardwired_responses; *hrp != NULL; hrp = &(*hrp)->next) {
+        hardwired_t *old = *hrp;
+        if (!strcmp(old->fullname, hp->name) && old->type == hp->type) {
+            INFO("hardwired_add: superseding %s name %s type %d rdlen %d", old->fullname, old->name, old->type, old->rdlen);
+            hp->next = old->next;
+            free(old);
+            break;
+        }
+    }
+    *hrp = hp;
 
     INFO("hardwired_add: fullname %s name %s type %d rdlen %d", hp->fullname, hp->name, hp->type, hp->rdlen);
 }
@@ -570,14 +603,6 @@ dnssd_hardwired_setup(void)
             continue;
         }
         
-        // Browsing pointers...
-#if 0
-        RESET;
-        dns_full_name_to_wire(NULL, &towire, sdt->domain);
-        dnssd_hardwired_add(sdt, "b._dns-sd._udp", sdt->domain_ld, towire.p - wire.data, wire.data, dns_rrtype_ptr);
-        dnssd_hardwired_add(sdt, "lb._dns-sd._udp", sdt->domain_ld, towire.p - wire.data, wire.data, dns_rrtype_ptr);
-#endif
-
         // SRV
         // _dns-llq._udp
         // _dns-llq-tls._tcp
@@ -592,44 +617,10 @@ dnssd_hardwired_setup(void)
         dnssd_hardwired_add(sdt, "_dns-update._udp", sdt->domain_ld, towire.p - wire.data, wire.data, dns_rrtype_srv);
         dnssd_hardwired_add(sdt, "_dns-update-tls._tcp", sdt->domain_ld, towire.p - wire.data, wire.data, dns_rrtype_srv);
     
-        if (sdt->interface->no_push) {
-            dnssd_hardwired_add(sdt, "_dns-push-tls._tcp", sdt->domain_ld, towire.p - wire.data, wire.data, dns_rrtype_srv);
-        } else {
-            // SRV
-            // _dns-push._tcp
-            RESET;
-            dns_u16_to_wire(&towire, 0); // priority
-            dns_u16_to_wire(&towire, 0); // weight
-            dns_u16_to_wire(&towire, 53); // port
-            // Define my_name in the config file to reference a name for this server in a different zone.
-            if (my_name == NULL) {
-                dns_name_to_wire(NULL, &towire, "ns");
-                dns_full_name_to_wire(NULL, &towire, sdt->domain);
-            } else {
-                dns_full_name_to_wire(NULL, &towire, my_name);
-            }
-            dnssd_hardwired_add(sdt, "_dns-push._tcp", sdt->domain_ld, towire.p - wire.data, wire.data, dns_rrtype_srv);
+        // Until we set up the DNS Push listener, we deny its existence.   If TLS is ready to go, this will be overwritten
+        // immediately; otherwise it will be overwritten when the TLS key has been generated and signed.
+        dnssd_hardwired_add(sdt, "_dns-push-tls._tcp", sdt->domain_ld, towire.p - wire.data, wire.data, dns_rrtype_srv);
 
-            // SRV
-            // _dns-push-tls._tcp
-            RESET;
-            dns_u16_to_wire(&towire, 0); // priority
-            dns_u16_to_wire(&towire, 0); // weight
-            dns_u16_to_wire(&towire, 853); // port
-            // Define my_name in the config file to reference a name for this server in a different zone.
-            if (my_name == NULL) {
-                dns_name_to_wire(NULL, &towire, "ns");
-                dns_full_name_to_wire(NULL, &towire, sdt->domain);
-            } else {
-                dns_full_name_to_wire(NULL, &towire, my_name);
-            }
-            dnssd_hardwired_add(sdt, "_dns-push-tls._tcp", sdt->domain_ld, towire.p - wire.data, wire.data, dns_rrtype_srv);
-            // This will probably never be used, but existing open source mDNSResponder code can be
-            // configured to do DNS queries over TLS for specific domains, so we might as well support it,
-            // since we do have TLS support.
-            dnssd_hardwired_add(sdt, "_dns-query-tls._udp", sdt->domain_ld, towire.p - wire.data, wire.data, dns_rrtype_srv);
-        }
-    
         // If my_name wasn't set, or if my_name is in this interface's domain, we need to answer
         // for it when queried.
         if (my_name == NULL || my_name_parsed != NULL) {
@@ -720,6 +711,48 @@ dnssd_hardwired_setup(void)
         }
     }
     dnssd_hardwired_lbdomains_setup(&towire, &wire);
+}
+
+void
+dnssd_hardwired_push_setup(void)
+{
+    dns_wire_t wire;
+    dns_towire_state_t towire;
+    served_domain_t *sdt;
+
+#define RESET \
+    memset(&towire, 0, sizeof towire); \
+    towire.message = &wire; \
+    towire.p = wire.data; \
+    towire.lim = towire.p + sizeof wire.data
+
+    // For each interface, set up the hardwired names.
+    for (sdt = served_domains; sdt; sdt = sdt->next) {
+        if (sdt->interface == NULL) {
+            continue;
+        }
+        
+        if (!sdt->interface->no_push) {
+            // SRV
+            // _dns-push-tls._tcp
+            RESET;
+            dns_u16_to_wire(&towire, 0); // priority
+            dns_u16_to_wire(&towire, 0); // weight
+            dns_u16_to_wire(&towire, 853); // port
+            // Define my_name in the config file to reference a name for this server in a different zone.
+            if (my_name == NULL) {
+                dns_name_to_wire(NULL, &towire, "ns");
+                dns_full_name_to_wire(NULL, &towire, sdt->domain);
+            } else {
+                dns_full_name_to_wire(NULL, &towire, my_name);
+            }
+            dnssd_hardwired_add(sdt, "_dns-push-tls._tcp", sdt->domain_ld, towire.p - wire.data, wire.data, dns_rrtype_srv);
+            // This will probably never be used, but existing open source mDNSResponder code can be
+            // configured to do DNS queries over TLS for specific domains, so we might as well support it,
+            // since we do have TLS support.
+            dnssd_hardwired_add(sdt, "_dns-query-tls._udp", sdt->domain_ld, towire.p - wire.data, wire.data, dns_rrtype_srv);
+        }
+    }
 }
 
 bool
@@ -1845,12 +1878,156 @@ config_file_verb_t dp_verbs[] = {
 };
 #define NUMCFVERBS ((sizeof dp_verbs) / sizeof (config_file_verb_t))
 
+void
+dnssd_push_setup()
+{
+    listener[num_listeners] = setup_listener_socket(AF_INET, IPPROTO_TCP, false,
+                                                    tcp_port, NULL, NULL, "IPv4 DNS Push Listener", dns_input, connected, 0);
+    if (listener[num_listeners] == NULL) {
+        ERROR("TCPv4 listener: fail.");
+        return;
+    } else {
+        num_listeners++;
+    }
+    
+    listener[num_listeners] = setup_listener_socket(AF_INET6, IPPROTO_TCP, false,
+                                                    tcp_port, NULL, NULL, "IPv6 DNS Push Listener", dns_input, connected, 0);
+    if (listener[num_listeners] == NULL) {
+        ERROR("TCPv6 listener: fail.");
+        return;
+    } else {
+        num_listeners++;
+    }
+
+    dnssd_hardwired_push_setup();
+}
+
+// Start a key generation or cert signing program.   Arguments are key=value pairs.
+// Arguments that can be constant should be <"key=value", NULL>.   Arguments that
+// have a variable component should be <"key", value">.  References to arguments
+// will be held, except that if the rhs of the pair is variable, memory is allocated
+// to store the key=value pair, so the neither the key nor the value is retained.
+// The callback is called when the program exits.
+
+void
+keyprogram_start(const char *program, subproc_callback_t callback, ...)
+{
+    size_t lens[MAX_SUBPROC_VARS];
+    char *vars[MAX_SUBPROC_VARS];
+    int num_vars = 0;
+    char *argv[MAX_SUBPROC_ARGS + 1];
+    int argc = 0;
+    va_list vl;
+    int i;
+    
+    va_start(vl, callback);
+    while (true) {
+        char *vname, *value;
+        char *arg;
+
+        vname = va_arg(vl, char *);
+        if (vname == NULL) {
+            break;
+        }
+        value = va_arg(vl, char *);
+
+        if (argc >= MAX_SUBPROC_ARGS) {
+            ERROR("keyprogram_start: too many arguments.");
+        fail:
+            for (i = 0; i < num_vars; i++) {
+                free(vars[i]);
+            }
+            return;
+        }
+
+        if (value == NULL) {
+            arg = vname;
+        } else {
+            if (num_vars >= MAX_SUBPROC_VARS) {
+                ERROR("Too many variable args: %s %s", vname, value);
+                goto fail;
+            }
+            lens[num_vars] = strlen(vname) + strlen(value) + 2;
+            vars[num_vars] = malloc(lens[num_vars]);
+            if (vars[num_vars] == NULL) {
+                ERROR("No memory for variable key=value %s %s", vname, value);
+                goto fail;
+            }
+            snprintf(vars[num_vars], lens[num_vars], "%s=%s", vname, value);
+            arg = vars[num_vars];
+            num_vars++;
+        }
+        argv[argc++] = arg;
+    }
+    argv[argc] = NULL;
+    ioloop_subproc(program, vars, num_vars, argv, argc, callback);
+}
+
+bool
+finished_okay(const char *context, int status, const char *error)
+{
+    // If we get an error, something failed before the program had been successfully started.
+    if (error != NULL) {
+        ERROR("%s failed on startup: %s", context, error);
+    }
+
+    // The key file generation process completed
+    else if (WIFEXITED(status)) {
+        if (WEXITSTATUS(status) != 0) {
+            ERROR("%s program exited with status %d", context, status);
+            // And that means we don't have DNS Push--sorry!
+        } else {
+            return true;
+        }
+    } else if (WIFSIGNALED(status)) {
+        ERROR("%s program exited on signal %d", context, WTERMSIG(status));
+        // And that means we don't have DNS Push--sorry!
+    } else if (WIFSTOPPED(status)) {
+        ERROR("%s program stopped on signal %d", context, WSTOPSIG(status));
+        // And that means we don't have DNS Push--sorry!
+    } else {        
+        ERROR("%s program exit status unknown: %d", context, status);
+        // And that means we don't have DNS Push--sorry!
+    }
+    return false;
+}
+
+// Called after the cert has been generated.
+void
+certfile_finished_callback(subproc_t *subproc, int status, const char *error)
+{
+    // If we were able to generate a cert, we can start DNS Push service and start advertising it.
+    if (finished_okay("Certificate signing", status, error)) {
+        int i = num_listeners;
+
+        dnssd_push_setup();
+
+        for (; i < num_listeners; i++) {
+            INFO("Started %s", listener[i]->name);
+        }
+    }
+}
+
+// Called after the key has been generated.
+void
+keyfile_finished_callback(subproc_t *subproc, int status, const char *error)
+{
+    if (finished_okay("Keyfile generation", status, error)) {
+            INFO("Keyfile generation completed.");
+
+            // XXX dates need to not be constant!!!
+            keyprogram_start("/usr/bin/cert_write", certfile_finished_callback,
+                             "selfsign=1", NULL, "issuer_key", tls_key_filename, "issuer_name", my_name,
+                             "not_before=20190226000000", NULL, "not_after=20211231235959", NULL, "is_ca=1", NULL,
+                             "max_pathlen=0", NULL, "output_file", tls_cert_filename);
+    }
+
+}
+
 int
 main(int argc, char **argv)
 {
     int i;
-    comm_t *listener[4 + MAX_ADDRS];
-    int num_listeners = 0;
     bool tls_fail = false;
 
     udp_port = tcp_port = 53;
@@ -1878,6 +2055,9 @@ main(int argc, char **argv)
 
     map_interface_addresses(&served_domains, ifaddr_callback);
 
+    // Set up hardwired answers
+    dnssd_hardwired_setup();
+
     if (!srp_tls_init()) {
         return 1;
     }
@@ -1885,8 +2065,14 @@ main(int argc, char **argv)
     // The tls_fail flag allows us to run the proxy in such a way that TLS connections will fail.
     // This is never what you want in production, but is useful for testing.
     if (!tls_fail) {
-        if (!srp_tls_server_init(NULL, tls_cert_filename, tls_key_filename)) {
-            return 1;
+        if (!access(tls_key_filename, R_OK)) {
+            keyprogram_start("/usr/bin/gen_key", keyfile_finished_callback,
+                             "type=rsa", NULL, "rsa_keysize=4096", NULL, "filename", tls_key_filename, NULL);
+        } else if (!access(tls_cert_filename, R_OK)) {
+            keyfile_finished_callback(NULL, 0, NULL);
+        } else if (srp_tls_server_init(NULL, tls_cert_filename, tls_key_filename)) {
+            // If we've been able to set up TLS, then we can do DNS push.
+            dnssd_push_setup();
         }
     }        
 
@@ -1895,17 +2081,6 @@ main(int argc, char **argv)
     }
 
 
-    // Set up hardwired answers
-    dnssd_hardwired_setup();
-
-    listener[num_listeners] = setup_listener_socket(AF_INET, IPPROTO_TCP, false,
-                                                    tcp_port, NULL, NULL, "IPv4 DNS Push Listener", dns_input, connected, 0);
-    if (listener[num_listeners] == NULL) {
-        ERROR("TCPv4 listener: fail.");
-        return 1;
-    }
-    num_listeners++;
-    
     listener[num_listeners] = setup_listener_socket(AF_INET, IPPROTO_TCP, true,
                                                     tls_port, NULL, NULL, "IPv4 DNS TLS Listener", dns_input, connected, 0);
     if (listener[num_listeners] == NULL) {
@@ -1923,14 +2098,6 @@ main(int argc, char **argv)
         }
         num_listeners++;
     }
-    
-    listener[num_listeners] = setup_listener_socket(AF_INET6, IPPROTO_TCP, false,
-                                                    tcp_port, NULL, NULL, "IPv6 DNS Push Listener", dns_input, connected, 0);
-    if (listener[num_listeners] == NULL) {
-        ERROR("TCPv6 listener: fail.");
-        return 1;
-    }
-    num_listeners++;
     
     listener[num_listeners] = setup_listener_socket(AF_INET6, IPPROTO_TCP, true,
                                                     tls_port, NULL, NULL, "IPv6 DNS TLS Listener", dns_input, connected, 0);
