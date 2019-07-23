@@ -110,7 +110,7 @@ typedef struct dnssd_query {
     io_t io;
     DNSServiceRef ref;
     char *name;                     // The name we are looking up.
-    served_domain_t *iface;      // If this is a local query, the interface for the query
+    served_domain_t *served_domain; // If this query matches an enclosing domain, the domain that matched.
 
                                     // If we've already copied out the enclosing domain once in a DNS message.
     dns_name_pointer_t enclosing_domain_pointer;
@@ -166,7 +166,10 @@ void
 dnssd_query_finalize(io_t *io)
 {
     dnssd_query_t *query = (dnssd_query_t *)io;
-    INFO("dnssd_query_finalize on %s%s", query->name, query->iface ? ".local" : "");
+    INFO("dnssd_query_finalize on %s%s",
+         query->name, (query->served_domain
+                       ? (query->served_domain->interface ? ".local" : query->served_domain->domain_ld)
+                       : ""));
     if (query->question) {
         message_free(query->question);
     }
@@ -180,7 +183,10 @@ dnssd_query_callback(io_t *io)
     dnssd_query_t *query = (dnssd_query_t *)io;
     int status = DNSServiceProcessResult(query->ref);
     if (status != kDNSServiceErr_NoError) {
-        ERROR("DNSServiceProcessResult on %s%s returned %d", query->name, query->iface ? ".local" : "", status);
+        ERROR("DNSServiceProcessResult on %s%s returned %d",
+              query->name, (query->served_domain != NULL
+                            ? (query->served_domain->interface != NULL ? ".local" : query->served_domain->domain_ld)
+                            : ""), status);
         if (query->activity != NULL && query->connection != NULL) {
             dso_drop_activity(query->connection->dso, query->activity);
         } else {
@@ -311,11 +317,11 @@ dp_query_add_data_to_response(dnssd_query_t *query, const char *fullname,
     INFO("dp_query_add_data_to_response: survived for rrtype %d rdlen %d", rrtype, rdlen);
 
     // Rewrite the domain if it's .local.
-    if (query->iface != NULL) {
+    if (query->served_domain != NULL) {
         TOWIRE_CHECK("concatenate_name_to_wire", towire,
-                     dns_concatenate_name_to_wire(towire, NULL, query->name, query->iface->domain));
+                     dns_concatenate_name_to_wire(towire, NULL, query->name, query->served_domain->domain));
         INFO("%s answer:  type %02d class %02d %s.%s", query->is_dns_push ? "PUSH" : "DNS ",
-             rrtype, rrclass, query->name, query->iface->domain);
+             rrtype, rrclass, query->name, query->served_domain->domain);
     } else {
         TOWIRE_CHECK("compress_name_to_wire", towire, dns_concatenate_name_to_wire(towire, NULL, NULL, query->name));
         INFO("%s answer:  type %02d class %02d %s (p)",
@@ -370,8 +376,8 @@ dp_query_add_data_to_response(dnssd_query_t *query, const char *fullname,
             // If the name ended in .local, concatenate the interface domain name to the end.
             if (local) {
                 TOWIRE_CHECK("concatenate_name_to_wire 2", towire,
-                             dns_concatenate_name_to_wire(towire, name, NULL, query->iface->domain));
-                INFO("translating %s to %s . %s", rbuf, pbuf, query->iface->domain);
+                             dns_concatenate_name_to_wire(towire, name, NULL, query->served_domain->domain));
+                INFO("translating %s to %s . %s", rbuf, pbuf, query->served_domain->domain);
             } else {
                 TOWIRE_CHECK("concatenate_name_to_wire 2", towire,
                              dns_concatenate_name_to_wire(towire, name, NULL, NULL));
@@ -411,9 +417,9 @@ dnssd_hardwired_add(served_domain_t *sdt,
     hp->fullname = hp->name + namelen + 1;
     if (namelen != 0) {
         strcpy(hp->fullname, name);
-        strcpy(hp->fullname + namelen, sdt->domain_ld);
+        strcpy(hp->fullname + namelen, domain);
     } else {
-        strcpy(hp->fullname, sdt->domain);
+        strcpy(hp->fullname, domain);
     }
     if (hp->fullname + strlen(hp->fullname) + 1 != (char *)hp + total) {
         ERROR("%p != %p", hp->fullname + strlen(hp->fullname) + 1, ((char *)hp) + total);
@@ -550,6 +556,7 @@ dnssd_hardwired_setup(void)
     dns_name_t *my_name_parsed = my_name == NULL ? NULL : dns_pres_name_parse(my_name);
     char namebuf[DNS_MAX_NAME_SIZE + 1];
     const char *local_name = my_name;
+    addr_t addr;
 
 #define RESET \
     memset(&towire, 0, sizeof towire); \
@@ -649,7 +656,6 @@ dnssd_hardwired_setup(void)
             }
             if (local_name != NULL) {
                 for (i = 0; i < num_publish_addrs; i++) {
-                    addr_t addr;
                     RESET;
                     memset(&addr, 0, sizeof addr);
                     getipaddr(&addr, publish_addrs[i]);
@@ -697,19 +703,19 @@ dnssd_hardwired_setup(void)
         if (sdt == NULL) {
             ERROR("Unable to allocate domain for %s", my_name);
         } else {
-            // A
-            // ns
-            for (i = 0; i < num_listen_addrs; i++) {
-                RESET;
-                dns_rdata_a_to_wire(&towire, listen_addrs[i]);
-                dnssd_hardwired_add(sdt, "", sdt->domain, towire.p - wire.data, wire.data, dns_rrtype_a);
-            }
-
             for (i = 0; i < num_publish_addrs; i++) {
                 // AAAA
+                // A
                 RESET;
-                dns_rdata_aaaa_to_wire(&towire, publish_addrs[i]);
-                dnssd_hardwired_add(sdt, "", sdt->domain, towire.p - wire.data, wire.data, dns_rrtype_aaaa);
+                memset(&addr, 0, sizeof addr);
+                getipaddr(&addr, publish_addrs[i]);
+                if (addr.sa.sa_family == AF_INET) {
+                    dns_rdata_raw_data_to_wire(&towire, &addr.sin.sin_addr, sizeof addr.sin.sin_addr);
+                    dnssd_hardwired_add(sdt, "", sdt->domain, towire.p - wire.data, wire.data, dns_rrtype_a);
+                } else {
+                    dns_rdata_raw_data_to_wire(&towire, &addr.sin6.sin6_addr, sizeof addr.sin6.sin6_addr);
+                    dnssd_hardwired_add(sdt, "", sdt->domain, towire.p - wire.data, wire.data, dns_rrtype_aaaa);
+                }
             }
         }
     }
@@ -748,7 +754,7 @@ dp_query_send_dns_response(dnssd_query_t *query)
     uint16_t mask = 0;
 
     // Send an SOA record if it's a .local query.
-    if (query->iface != NULL && !towire->truncated) {
+    if (query->served_domain != NULL && query->served_domain->interface != NULL && !towire->truncated) {
     redo:
         // DNSSD Hybrid, Section 6.1.
         TOWIRE_CHECK("&query->enclosing_domain_pointer 1", towire,
@@ -925,7 +931,7 @@ dnssd_hardwired_response(dnssd_query_t *query, DNSServiceQueryRecordReply callba
     hardwired_t *hp;
     bool got_response = false;
 
-    for (hp = query->iface->hardwired_responses; hp; hp = hp->next) {
+    for (hp = query->served_domain->hardwired_responses; hp; hp = hp->next) {
         if ((query->type == hp->type || query->type == dns_rrtype_any) &&
             query->qclass == dns_qclass_in && !strcasecmp(hp->name, query->name)) {
             if (query->is_dns_push) {
@@ -1013,13 +1019,17 @@ dp_query_wakeup(io_t *io)
     int namelen = strlen(query->name);
 
     // Should never happen.
-    if ((namelen + query->iface != NULL ? sizeof local_suffix : 0) > sizeof name) {
+    if (namelen + (query->served_domain
+                   ? (query->served_domain->interface != NULL
+                      ? sizeof local_suffix
+                      : strlen(query->served_domain->domain_ld))
+                   : 0) > sizeof name) {
         ERROR("db_query_wakeup: no space to construct name.");
         dnssd_query_cancel(&query->io);
     }
 
     strcpy(name, query->name);
-    if (query->iface != NULL) {
+    if (query->served_domain != NULL) {
         strcpy(name + namelen, local_suffix);
     }
     dp_query_send_dns_response(query);
@@ -1030,35 +1040,52 @@ dp_query_start(comm_t *comm, dnssd_query_t *query, int *rcode, DNSServiceQueryRe
 {
     char name[DNS_MAX_NAME_SIZE + 1];
     char *np;
+    bool local = false;
+    int len;
 
-    if (query->iface != NULL) {
+    // If a query has a served domain, query->name is the subdomain of the served domain that is
+    // being queried; otherwise query->name is the whole name.
+    if (query->served_domain != NULL) {
         if (dnssd_hardwired_response(query, callback)) {
             *rcode = dns_rcode_noerror;
             return true;
         }
-
-        int len = strlen(query->name);
-        if (len + sizeof local_suffix > sizeof name) {
-            *rcode = dns_rcode_servfail;
-            free(query->name);
-            free(query);
-            ERROR("question name %s is too long for .local.", name);
-            return false;
+        len = strlen(query->name);
+        if (query->served_domain->interface != NULL) {
+            if (len + sizeof local_suffix > sizeof name) {
+                *rcode = dns_rcode_servfail;
+                free(query->name);
+                free(query);
+                ERROR("question name %s is too long for .local.", name);
+                return false;
+            }
+            memcpy(name, query->name, len);
+            memcpy(&name[len], local_suffix, sizeof local_suffix);
+        } else {
+            int dlen = strlen(query->served_domain->domain_ld) + 1;
+            if (len + dlen > sizeof name) {
+                *rcode = dns_rcode_servfail;
+                free(query->name);
+                free(query);
+                ERROR("question name %s is too long for %s.", name, query->served_domain->domain);
+                return false;
+            }
+            memcpy(name, query->name, len);
+            memcpy(&name[len], query->served_domain->domain_ld, dlen);
         }
-        memcpy(name, query->name, len);
-        memcpy(&name[len], local_suffix, sizeof local_suffix);
         np = name;
+        local = true;
     } else {
         np = query->name;
     }
         
-    // If we get an SOA query for record that's under a zone cut we're authoritative, which
-    // is the case of query->iface != NULL, then answer with a negative response that includes
+    // If we get an SOA query for record that's under a zone cut we're authoritative for, which
+    // is the case of query->served_domain->interface != NULL, then answer with a negative response that includes
     // our authority records, rather than waiting for the query to time out.
-    if (query->iface != NULL && (query->type == dns_rrtype_soa ||
-                                 query->type == dns_rrtype_ns ||
-                                 query->type == dns_rrtype_ds) &&
-        query->qclass == dns_qclass_in && query->is_dns_push == false) {
+    if (query->served_domain != NULL && query->served_domain->interface != NULL &&
+        (query->type == dns_rrtype_soa ||
+         query->type == dns_rrtype_ns ||
+         query->type == dns_rrtype_ds) && query->qclass == dns_qclass_in && query->is_dns_push == false) {
         query->question = comm->message;
         comm->message = NULL;
         dp_query_send_dns_response(query);
@@ -1080,7 +1107,7 @@ dp_query_start(comm_t *comm, dnssd_query_t *query, int *rcode, DNSServiceQueryRe
     // If this isn't a DNS Push subscription, we need to respond quickly with as much data as we have.  It
     // turns out that dig gives us a second, but also that responses seem to come back in on the order of a
     // millisecond, so we'll wait 100ms.
-    if (!query->is_dns_push && query->iface) {
+    if (!query->is_dns_push && local) {
         query->io.wakeup_time = ioloop_now + IOLOOP_SECOND * 6; // [mDNSDP 5.6 p. 25]
         query->io.wakeup = dp_query_wakeup;
     }
@@ -1132,11 +1159,11 @@ dp_query_generate(comm_t *comm, dns_rr_t *question, bool dns_push, int *rcode)
         return NULL;
     }
     // It is safe to assume that enclosing domain will not be freed out from under us.
-    query->iface = sdt;
+    query->served_domain = sdt;
     query->serviceFlags = 0;
 
     // If this is a local query, add ".local" to the end of the name and require multicast.
-    if (sdt != NULL) {
+    if (sdt != NULL && sdt->interface) {
         query->serviceFlags |= kDNSServiceFlagsForceMulticast;
     } else {
         query->serviceFlags |= kDNSServiceFlagsReturnIntermediates;
@@ -1473,11 +1500,11 @@ dp_dns_query(comm_t *comm, dns_rr_t *question)
 
     // For DNS queries, we need to return the question.
     query->response->qdcount = htons(1);
-    if (query->iface != NULL) {
+    if (query->served_domain != NULL) {
         TOWIRE_CHECK("name", &query->towire, dns_name_to_wire(NULL, &query->towire, query->name));
         TOWIRE_CHECK("enclosing_domain", &query->towire,
                      dns_full_name_to_wire(&query->enclosing_domain_pointer,
-                                           &query->towire, query->iface->domain));
+                                           &query->towire, query->served_domain->domain));
     } else {
         TOWIRE_CHECK("full name", &query->towire, dns_full_name_to_wire(NULL, &query->towire, query->name));
     }        
