@@ -32,6 +32,7 @@
 #ifdef USE_KQUEUE
 #include <sys/event.h>
 #endif
+#include <sys/wait.h>
 #include <fcntl.h>
 #include <sys/time.h>
 #include <signal.h>
