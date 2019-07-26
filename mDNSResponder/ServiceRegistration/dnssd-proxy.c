@@ -483,6 +483,7 @@ void dnssd_hardwired_lbdomains_setup(dns_towire_state_t *towire, dns_wire_t *wir
             continue;
         }
         INFO("Interface %s", interface->name);
+        // Add lb domain support for link domain
         for (ifaddr = interface->addresses; ifaddr != NULL; ifaddr = ifaddr->next) {
             if (ifaddr->addr.sa.sa_family == AF_INET) {
                 uint8_t *address = (uint8_t *)&(ifaddr->addr.sin.sin_addr);
