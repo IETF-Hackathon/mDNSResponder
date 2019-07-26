@@ -515,7 +515,6 @@ void dnssd_hardwired_lbdomains_setup(dns_towire_state_t *towire, dns_wire_t *wir
                     }
                 }
 
-#if 0
                 INFO("Adding PTRs for %s", name);
                 for (interface_domain = served_domains; interface_domain != NULL; interface_domain = interface_domain->next) {
                     if (interface_domain->interface == NULL || interface_domain->interface->ifindex == 0) {
@@ -526,7 +525,6 @@ void dnssd_hardwired_lbdomains_setup(dns_towire_state_t *towire, dns_wire_t *wir
                     dns_full_name_to_wire(NULL, towire, interface_domain->domain);
                     dnssd_hardwired_add(ipv4, name, ipv4->domain_ld, towire->p - wire->data, wire->data, dns_rrtype_ptr);
                 }
-#endif
             } else if (ifaddr->addr.sa.sa_family == AF_INET6) {
                 uint8_t *address = (uint8_t *)&(ifaddr->addr.sin6.sin6_addr);
                 uint8_t *mask = (uint8_t *)&(ifaddr->mask.sin6.sin6_addr);
