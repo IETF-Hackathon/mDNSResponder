@@ -985,7 +985,7 @@ srp_relay(comm_t *comm, dns_message_t *message)
                     goto out;
                 }
             }
-            dp = calloc(sizeof *dp, 1);
+            dp = calloc(1, sizeof *dp);
             if (!dp) {
                 ERROR("srp_relay: no memory.");
                 goto out;
@@ -1008,7 +1008,7 @@ srp_relay(comm_t *comm, dns_message_t *message)
         else if (rr->type == dns_rrtype_a || rr->type == dns_rrtype_aaaa || rr->type == dns_rrtype_key) {
             // Allocate the hostname record
             if (!host_description) {
-                host_description = calloc(sizeof *host_description, 1);
+                host_description = calloc(1, sizeof *host_description);
                 if (!host_description) {
                     ERROR("srp_relay: no memory");
                     goto out;
@@ -1079,7 +1079,7 @@ srp_relay(comm_t *comm, dns_message_t *message)
                 }
             }
             if (!sip) {
-                sip = calloc(sizeof *sip, 1);
+                sip = calloc(1, sizeof *sip);
                 if (sip == NULL) {
                     ERROR("srp_relay: no memory");
                     goto out;
@@ -1108,7 +1108,7 @@ srp_relay(comm_t *comm, dns_message_t *message)
 
         // Otherwise if it's a PTR entry, that should be a service name
         else if (rr->type == dns_rrtype_ptr) {
-            sp = calloc(sizeof *sp, 1);
+            sp = calloc(1, sizeof *sp);
             if (sp == NULL) {
                 ERROR("srp_relay: no memory");
                 goto out;

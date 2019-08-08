@@ -54,7 +54,7 @@ dns_label_parse(const uint8_t *buf, unsigned mlen, unsigned *NONNULL offp)
         return NULL;
     }
 
-    rv = calloc(llen + 1 - DNS_MAX_LABEL_SIZE + sizeof *rv, 1);
+    rv = calloc(1, llen + 1 - DNS_MAX_LABEL_SIZE + sizeof *rv);
     if (rv == NULL) {
         DEBUG("memory allocation for %u byte label (%.*s) failed.\n",
               *offp + llen + 1, *offp + llen + 1, &buf[*offp + 1]);
@@ -545,7 +545,7 @@ bool
 dns_wire_parse(dns_message_t *NONNULL *NULLABLE ret, dns_wire_t *message, unsigned len)
 {
     unsigned offset = 0;
-    dns_message_t *rv = calloc(sizeof *rv, 1);
+    dns_message_t *rv = calloc(1, sizeof *rv);
     int i;
     
     if (rv == NULL) {
@@ -561,7 +561,7 @@ dns_wire_parse(dns_message_t *NONNULL *NULLABLE ret, dns_wire_t *message, unsign
     fprintf(stderr, "Section %s, %d records\n", name, rv->count);                   \
                                                                                     \
     if (rv->qdcount != 0) {                                                         \
-        rv->sets = calloc(sizeof *rv->sets, rv->count);                             \
+        rv->sets = calloc(rv->count, sizeof *rv->sets);                             \
         if (rv->sets == NULL) {                                                     \
             dns_message_free(rv);                                                   \
             return false;                                                           \

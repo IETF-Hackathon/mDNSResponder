@@ -105,7 +105,7 @@ static srp_key_t *
 srp_key_setup(void)
 {
     int status;
-    srp_key_t *key = calloc(sizeof *key, 1);
+    srp_key_t *key = calloc(1, sizeof *key);
     char errbuf[64];
 
     if (key == NULL) {

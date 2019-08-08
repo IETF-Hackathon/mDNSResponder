@@ -293,8 +293,8 @@ Replace the hostname discoveryproxy.home.arpa with the actual hostname of the Di
 
 On a linux or MacOS install, you will run the gen_key and cert_write commands:
 
-    $HOME/mbedtls/programs/pkey/gen_key type=rsa rsa_keysize=4096 filename=server.key
-    $HOME/mbedtls/programs/x509/cert_write selfsign=1 issuer_key=server.key issuer_name=CN=discoveryproxy.home.arpa not_before=20190226000000 not_after=20211231235959 is_ca=1 max_pathlen=0 output_file=server.crt
+    gen_key type=rsa rsa_keysize=4096 filename=server.key
+    cert_write selfsign=1 issuer_key=server.key issuer_name=CN=discoveryproxy.home.arpa not_before=20190226000000 not_after=20211231235959 is_ca=1 max_pathlen=0 output_file=server.crt
     sudo mkdir /etc/dnssd-proxy
     sudo mv server.key server.crt /etc/dnssd-proxy
 
@@ -305,7 +305,7 @@ The dnssd-proxy operation is controlled by the file
 If running on Linux or Mac, create this file with text as illustrated below:
 
 	interface en0 service.home.arpa.
-	my-name discoveryproxy.home.arpa.
+	#my-name discoveryproxy.home.arpa.
 	my-ipv4-addr 203.0.113.123
 	udp-port 53
 	tcp-port 53
