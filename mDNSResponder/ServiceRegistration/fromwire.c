@@ -243,21 +243,15 @@ dns_rrdata_dump(FILE *outfile, dns_rr_t *rr)
         break;
 
     case dns_rrtype_a:
-        fputs("A", outfile);
-        for (i = 0; i < rr->data.a.num; i++) {
-            inet_ntop(AF_INET, &rr->data.a.addrs[i], nbuf, sizeof nbuf);
-            putc(' ', outfile);
-            fputs(nbuf, outfile);
-        }
+        fputs("A ", outfile);
+        inet_ntop(AF_INET, &rr->data.a, nbuf, sizeof nbuf);
+        fputs(nbuf, outfile);
         break;
         
     case dns_rrtype_aaaa:
-        fputs("AAAA", outfile);
-        for (i = 0; i < rr->data.aaaa.num; i++) {
-            inet_ntop(AF_INET6, &rr->data.aaaa.addrs[i], nbuf, sizeof nbuf);
-            putc(' ', outfile);
-            fputs(nbuf, outfile);
-        }
+        fputs("AAAA ", outfile);
+        inet_ntop(AF_INET6, &rr->data.aaaa, nbuf, sizeof nbuf);
+        fputs(nbuf, outfile);
         break;
 
     case dns_rrtype_txt:
@@ -292,7 +286,6 @@ dns_rrdata_dump(FILE *outfile, dns_rr_t *rr)
 bool
 dns_rdata_parse_data(dns_rr_t *NONNULL rr, const uint8_t *buf, unsigned *NONNULL offp, unsigned target, unsigned rdlen, unsigned rrstart)
 {
-    uint16_t addrlen;
     dns_txt_element_t *txt, **ptxt;
 
     switch(rr->type) {
@@ -351,26 +344,21 @@ dns_rdata_parse_data(dns_rr_t *NONNULL rr, const uint8_t *buf, unsigned *NONNULL
         }
         break;
 
-        // We assume below that the a and aaaa structures in the data union are exact aliases of
-        // each another.
     case dns_rrtype_a:
-        addrlen = 4;
-        goto addr_parse;
+        if (rdlen != 4) {
+            DEBUG("dns_rdata_parse: A rdlen is not 4: %u", rdlen);
+            return false;
+        }
+        memcpy(&rr->data.a, &buf[*offp], rdlen);
+        *offp = target;
+        break;
         
     case dns_rrtype_aaaa:
-        addrlen = 16;
-    addr_parse:
-        if (rdlen & (addrlen - 1)) {
-            DEBUG("dns_rdata_parse: %s rdlen not an even multiple of %u: %u",
-                  addrlen == 4 ? "A" : "AAAA", addrlen, rdlen);
+        if (rdlen != 16) {
+            DEBUG("dns_rdata_parse: AAAA rdlen is not 16: %u", rdlen);
             return false;
         }
-        rr->data.a.addrs = malloc(rdlen);
-        if (rr->data.a.addrs == NULL) {
-            return false;
-        }
-        rr->data.a.num = rdlen /  addrlen;
-        memcpy(rr->data.a.addrs, &buf[*offp], rdlen);
+        memcpy(&rr->data.aaaa, &buf[*offp], rdlen);
         *offp = target;
         break;
         
@@ -503,12 +491,6 @@ dns_rrdata_free(dns_rr_t *rr)
         rr->data.ptr.name = NULL;
         break;
 
-    case dns_rrtype_a:
-    case dns_rrtype_aaaa:
-        free(rr->data.a.addrs);
-        rr->data.a.addrs = NULL;
-        break;
-        
     case dns_rrtype_txt:
     default:
         free(rr->data.unparsed.data);
