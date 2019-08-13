@@ -98,6 +98,7 @@ $(OBJDIR)/%.o:	%.c
 -include .depfile-sign-mbedtls.c
 -include .depfile-srp-gw.c
 -include .depfile-srp-simple.c
+-include .depfile-srp-parse.c
 -include .depfile-tls-mbedtls.c
 -include .depfile-towire.c
 -include .depfile-verify-mbedtls.c
