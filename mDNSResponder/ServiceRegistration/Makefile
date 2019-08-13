@@ -68,7 +68,7 @@ $(BUILDDIR)/dnssd-proxy:  $(OBJDIR)/dnssd-proxy.o $(SIMPLEOBJS) $(DSOOBJS) $(MDN
 $(BUILDDIR)/srp-simple:	$(OBJDIR)/srp-simple.o $(SIMPLEOBJS)
 	$(CC) -o $@ $+ $(SRPLDOPTS)
 
-$(BUILDDIR)/srp-gw:	$(OBJDIR)/srp-gw.o $(SIMPLEOBJS) $(FROMWIREOBJS) $(IOOBJS) $(HMACOBJS) $(CFOBJS)
+$(BUILDDIR)/srp-gw:	$(OBJDIR)/srp-gw.o $(OBJDIR)/srp-parse.o $(SIMPLEOBJS) $(FROMWIREOBJS) $(IOOBJS) $(HMACOBJS) $(CFOBJS)
 	$(CC) -o $@ $+ $(SRPLDOPTS)
 
 $(BUILDDIR)/keydump:	$(OBJDIR)/keydump.o $(SIMPLEOBJS) $(FROMWIREOBJS)
