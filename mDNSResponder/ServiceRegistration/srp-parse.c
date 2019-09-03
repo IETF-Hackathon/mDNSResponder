@@ -141,11 +141,17 @@ srp_evaluate(comm_t *comm, dns_message_t *message)
     service_instance_t *service_instances = NULL, *sip, **sipp = &service_instances;
     service_t *services = NULL, *sp, **spp = &services;
     dns_rr_t *signature;
+    dns_rr_t *key;
     char namebuf[DNS_MAX_NAME_SIZE + 1], namebuf1[DNS_MAX_NAME_SIZE + 1];
     bool ret = false;
     struct timeval now;
     dns_name_t *update_zone, *replacement_zone;
     dns_name_t *uzp;
+    dns_rr_t *key = NULL;
+    dns_rr_t **keys = NULL;
+    int num_keys = 0;
+    int max_keys = 1;
+    bool found_key = false;
 
     // Update requires a single SOA record as the question
     if (message->qdcount != 1) {
@@ -206,8 +212,36 @@ srp_evaluate(comm_t *comm, dns_message_t *message)
             dp->name = rr->name;
         }
 
+        // The update should really only contain one key, but it's allowed for keys to appear on
+        // service instance names as well, since that's what will be stored in the zone.   So if
+        // we get one key, we'll assume it's a host key until we're done scanning, and then check.
+        // If we get more than one, we allocate a buffer and store all the keys so that we can
+        // check them all later.
+        else if (rr->type == dns_rrtype_key) {
+            if (num_keys == 1) {
+                key = rr;
+            } else {
+                if (num_keys == 1) {
+                    // We can't have more keys than there are authority records left, plus
+                    // one for the key we already have, so allocate a buffer that large.
+                    max_keys = message->nscount - i + 1;
+                    keys = calloc(max_keys, sizeof *keys);
+                    if (keys == NULL) {
+                        ERROR("srp_evaluate: no memory");
+                        goto out;
+                    }
+                    keys[0] = key;
+                }
+                if (num_keys >= max_keys) {
+                    ERROR("srp_evaluate: coding error in key allocation");
+                    goto out;
+                }
+                keys[num_keys++] = rr;
+            }
+        }
+                    
         // Otherwise if it's an A or AAAA record, it's part of a hostname entry.
-        else if (rr->type == dns_rrtype_a || rr->type == dns_rrtype_aaaa || rr->type == dns_rrtype_key) {
+        else if (rr->type == dns_rrtype_a || rr->type == dns_rrtype_aaaa) {
             // Allocate the hostname record
             if (!host_description) {
                 host_description = calloc(sizeof *host_description, 1);
@@ -246,13 +280,6 @@ srp_evaluate(comm_t *comm, dns_message_t *message)
                 if (!add_addr_reg(&host_description->aaaa, rr)) {
                     goto out;
                 }
-            } else if (rr->type == dns_rrtype_key) {
-                if (host_description->key != NULL) {
-                    ERROR("srp_evaluate: more than one KEY rrset received for name: %s",
-                          dns_name_print(rr->name, namebuf, sizeof namebuf));
-                    goto out;
-                }
-                host_description->key =  rr;
             }
         }
 
@@ -390,6 +417,40 @@ srp_evaluate(comm_t *comm, dns_message_t *message)
               dns_name_print(host_description->name, namebuf, sizeof namebuf));
         goto out;
     }
+
+    for (i = 0; i < num_keys; i++) {
+        // If this isn't the only key, make sure it's got the same contents as the other keys.
+        if (i > 0) {
+            if (!dns_keys_equal(key, keys[i])) {
+                ERROR("srp_evaluate: more than one key presented");
+                goto out;
+            }
+            // This is a hack so that if num_keys == 1, we don't have to allocate keys[].
+            // At the bottom of this if statement, key is always the key we are looking at.
+            key = keys[i];
+        }
+        // If there is a key, and the host description doesn't currently have a key, check
+        // there first since that's the default.
+        if (host_description->key == NULL && dns_names_equal(key->rr, host_description->name)) {
+            host_description->key =  rr;
+            found_key = true;
+        } else {
+            for (sip = service_instances; sip != NULL; sip = sip->next) {
+                if (dns_names_equal(service_instance->name, key->name)) {
+                    found_key = true;
+                    break;
+                }
+            }
+        }
+        if (!found_key) {
+            ERROR("srp_evaluate: key present for name %s which is neither a host nor an instance name.",
+                  dns_name_print(key->name, namebuf, sizeof namebuf));
+            goto out;
+        }
+    }
+    free(keys);
+    keys = NULL;
+        
     // And make sure it has a key record
     if (host_description->key == NULL) {
         ERROR("srp_evaluate: host description %s doesn't contain a key.",
