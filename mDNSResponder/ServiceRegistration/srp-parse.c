@@ -556,7 +556,6 @@ srp_evaluate(comm_t *comm, dns_message_t *message)
     ret = srp_update_start(comm, message, host_description, service_instances, services,
                            replacement_zone == NULL ? update_zone : replacement_zone);
     if (ret == true) {
-        INFO("Connecting to auth server.");
         comm->message = NULL; // This is retained for the length of the dns update process.
         ret = true;
         goto success;
