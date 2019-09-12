@@ -41,16 +41,15 @@ struct delete {
     bool consumed;
 };
 
-typedef struct dns_addr_reg dns_addr_reg_t;
-struct dns_addr_reg {
-    dns_addr_reg_t *NULLABLE next;
-    void *NULLABLE sdref;
-    dns_rr_t *NONNULL rr;
+typedef struct host_addr host_addr_t;
+struct host_addr {
+    host_addr_t *NULLABLE next;
+    dns_rr_t rr;
 };
 typedef struct dns_host_description dns_host_description_t;
 struct dns_host_description {
     dns_name_t *NONNULL name;
-    dns_addr_reg_t *NULLABLE a, *NULLABLE aaaa;
+    host_addr_t *NULLABLE addrs;
     dns_rr_t *NULLABLE key;
     delete_t *NULLABLE delete;
     int num_instances;
