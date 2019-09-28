@@ -25,7 +25,7 @@ However, to get the benefit of fast asynchronous change notifications using
 DNS Push Notifications, which keeps the user interface up to date without polling,
 we highly recommend testing using the current shipping versions, macOS Catalina and iOS 13.
 
-This document last updated 2019-07-28.
+This document last updated 2019-09-28.
 
 ## Example Scenario
 
