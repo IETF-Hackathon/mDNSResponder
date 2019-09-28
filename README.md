@@ -17,7 +17,15 @@ Other useful background reading includes the
 [DNS Stateful Operations (RFC 8490)](https://tools.ietf.org/html/rfc8490), and
 [DNS Push Notifications](https://tools.ietf.org/html/draft-ietf-dnssd-push).
 
-This document last updated 2019-07-22.
+This Discovery Proxy will work, using DNS polling, with
+any version of Mac OS X 10.4 (released in 2004) or later.
+Support for wide area unicast service discovery has also been included
+in every version of iOS since the first iPhone in 2007.
+However, to get the benefit of fast asynchronous change notifications using
+DNS Push Notifications, which keeps the user interface up to date without polling,
+we highly recommend testing using the current shipping versions, macOS Catalina and iOS 13.
+
+This document last updated 2019-07-28.
 
 ## Example Scenario
 
@@ -334,7 +342,7 @@ followed by “waiting” when the dnssd-proxy is ready to start processing requ
 This Discovery Proxy, built using
 [DNS Stateful Operations](https://tools.ietf.org/html/rfc8490) and
 [DNS Push Notifications](https://tools.ietf.org/html/draft-ietf-dnssd-push),
-can be used with the current Apple developer seeds of iOS 13 and macOS Catalina.
+can be used with iOS 13 and macOS Catalina.
 Older versions of iOS and macOS do not include support for
 DNS Stateful Operations and DNS Push Notifications.
 Older versions of iOS and macOS will work with the Discovery Proxy
