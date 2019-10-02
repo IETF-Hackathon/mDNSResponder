@@ -25,7 +25,7 @@ However, to get the benefit of fast asynchronous change notifications using
 DNS Push Notifications, which keeps the user interface up to date without polling,
 we highly recommend testing using the current shipping versions, macOS Catalina and iOS 13.
 
-This document last updated 2019-09-28.
+This document last updated 2019-10-02.
 
 ## Example Scenario
 
@@ -145,7 +145,7 @@ It’s just sitting there collecting random data, so it will eventually complete
     gen_key type=rsa rsa_keysize=4096 filename=server.key
     cert_write selfsign=1 issuer_key=server.key issuer_name=CN=discoveryproxy.home.arpa not_before=20190226000000 not_after=20211231235959 is_ca=1 max_pathlen=0 output_file=server.crt
 
-Create firewall rules to allow [Multicast DNS](https://tools.ietf.org/html/rfc6762) service discovery on the WAN port:
+Create firewall rules to allow [Multicast DNS](https://tools.ietf.org/html/rfc6762) service discovery on the AR750S’s WAN port:
 
     uci add glfw opening
     uci set glfw.@opening[-1].name='mDNS'
@@ -161,19 +161,38 @@ Configure the DHCP domain which is communicated to clients:
     /etc/init.d/dhcpd restart
     reboot
 
-At this point your Discovery Proxy is configured and running.
-In this default configuration your Discovery Proxy is configured
-to offer Discovery Proxy service on the LAN ports (and Wi-Fi),
-using [Multicast DNS](https://tools.ietf.org/html/rfc6762) to
-discover existing services on its WAN port (your existing home network).
-This makes services on the upstream WAN port
-visible to clients on the downstream LAN ports or Wi-Fi,
-even though the clients are not on the same link or IPv4 subnet
-as the services they are discovering.
+At this point your AR750S Discovery Proxy is configured and ready for use.
+In this default configuration your AR750S Discovery Proxy is configured
+to offer unicast Discovery Proxy service on its LAN ports and Wi-Fi,
+using [Multicast DNS](https://tools.ietf.org/html/rfc6762)
+on its WAN port (your existing home network)
+to discover existing services on that network.
+This makes services on the AR750S’s upstream WAN port
+visible to clients on the AR750S’s downstream LAN ports and Wi-Fi,
+even though those clients are not on the same link or IPv4 subnet
+as the services they are discovering,
+and no multicast packets are being forwarded
+between the client link (AR750S LAN port or Wi-Fi)
+and the services link (AR750S WAN port).
+This is possible because existing clients are already able
+to perform service discovery using unicast DNS queries,
+in addition to the conventional way using multicast DNS queries.
 
-Once the AR750S completes its reboot,
-if you’re connecting via Wi-Fi confirm that your computer is still associated with the AR750S,
-and then try again to see what your computer can discover now.
+Once the AR750S completes its reboot, the Discovery Proxy is available and running.
+If you’re connecting via Wi-Fi, confirm that your computer is still associated with the AR750S
+(it may have reverted to your previous Wi-Fi network while the AR750S was rebooting).
+
+Note: We are aware of a race condition where,
+if the upstream DHCP server is slow,
+sometimes the Discovery Proxy may not recognize the correct
+upstream DNS configuration, resulting in DNS failures.
+We will be fixing this race condition, but in the meantime, to avoid problems caused by this,
+use the commands shown below to log in to the AR750S and manually restart the mDNSResponder daemon:
+
+    ssh root@192.168.8.1
+    /etc/init.d/mDNSResponder restart
+
+Now try again to see what your computer can discover.
 
 If you have machines with ssh enabled that are usually visible
 in “New Remote Connection” in Terminal, they should now be visible
