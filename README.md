@@ -96,8 +96,8 @@ we have a prebuilt package for the router we are using for development,
 the [GL.iNet AR750S](https://www.gl-inet.com/products/gl-ar750s/).
 This package may also work on routers with similar hardware.
 
-Connect the WAN port of the AR750S to your existing home network,
-and connect your computer to a LAN port on the AR750S, or its Wi-Fi network.
+Connect the upstream WAN port of the AR750S to your existing home network,
+and connect your computer to a downstream LAN port on the AR750S, or its Wi-Fi network.
 Ensure that your AR750S is up to date with the latest firmware from GL.iNet.
 At time of writing, this is version 3.025.
 When you update the firmware, turn off the “Keep Settings” option.
@@ -106,14 +106,17 @@ which ensures that you’re following the setup steps described here
 starting with the same factory default configuration that we did.
 
 Your AR750S should be in the default configuration,
-where it is obtaining an IP address for itself using DHCP on its WAN port (your existing home network),
+where it is obtaining an IP address for itself using DHCP on its upstream WAN port (your existing home network),
 and sharing that IP address with its LAN (and Wi-Fi) clients by operating its own DHCP server and NAT gateway.
 
 At this point, take a moment to observe that your computer connected to the AR750S’s
-LAN port or Wi-Fi cannot discover anything on the WAN port side.
-If you press Cmd-Shift-K (“New Remote Connection”) in Terminal, you’ll not see any services on the WAN port side.
-If you go to System Preferences and try to add a printer, you’ll not discover any printers on the WAN port side.
-If you run “Image Capture”, you’ll not discover any scanners on the WAN port side.
+downstream LAN port or Wi-Fi cannot discover anything on the upstream WAN port side.
+If you press Cmd-Shift-K (“New Remote Connection”) in Terminal,
+you’ll not see any services on the upstream WAN port side.
+If you go to System Preferences and try to add a printer,
+you’ll not discover any printers on the upstream WAN port side.
+If you run “Image Capture”,
+you’ll not discover any scanners on the upstream WAN port side.
 
 To install the Discovery Proxy on your AR750S, bring up a Terminal window on your Mac and type:
 
@@ -145,7 +148,8 @@ It’s just sitting there collecting random data, so it will eventually complete
     gen_key type=rsa rsa_keysize=4096 filename=server.key
     cert_write selfsign=1 issuer_key=server.key issuer_name=CN=discoveryproxy.home.arpa not_before=20190226000000 not_after=20211231235959 is_ca=1 max_pathlen=0 output_file=server.crt
 
-Create firewall rules to allow [Multicast DNS](https://tools.ietf.org/html/rfc6762) service discovery on the AR750S’s WAN port:
+Create firewall rules to allow [Multicast DNS](https://tools.ietf.org/html/rfc6762) service discovery
+on the AR750S’s upstream WAN port:
 
     uci add glfw opening
     uci set glfw.@opening[-1].name='mDNS'
@@ -163,9 +167,9 @@ Configure the DHCP domain which is communicated to clients:
 
 At this point your AR750S Discovery Proxy is configured and ready for use.
 In this default configuration your AR750S Discovery Proxy is configured
-to offer unicast Discovery Proxy service on its LAN ports and Wi-Fi,
+to offer unicast Discovery Proxy service on its downstream LAN ports and Wi-Fi,
 using [Multicast DNS](https://tools.ietf.org/html/rfc6762)
-on its WAN port (your existing home network)
+on its upstream WAN port (your existing home network)
 to discover existing services on that network.
 This makes services on the AR750S’s upstream WAN port
 visible to clients on the AR750S’s downstream LAN ports and Wi-Fi,
@@ -196,7 +200,7 @@ Now try again to see what your computer can discover.
 
 If you have machines with ssh enabled that are usually visible
 in “New Remote Connection” in Terminal, they should now be visible
-when you’re connected to an AR750S LAN port or Wi-Fi.
+when you’re connected to an AR750S downstream LAN port or Wi-Fi.
 
 If you have network printers on your existing home network,
 they should now appear in when you click the “+” button to add a printer
