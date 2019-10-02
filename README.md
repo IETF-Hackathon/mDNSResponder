@@ -180,7 +180,7 @@ between the client link (AR750S LAN port or Wi-Fi)
 and the services link (AR750S WAN port).
 This is possible because existing clients are already able
 to perform service discovery using unicast DNS queries,
-in addition to the conventional way using multicast DNS queries.
+in addition to the old way using multicast DNS queries.
 
 Once the AR750S completes its reboot, the Discovery Proxy is available and running.
 If you’re connecting via Wi-Fi, confirm that your computer is still associated with the AR750S
@@ -306,7 +306,7 @@ The “home.arpa” domain is reserved for this kind of local use.
 To recap:
 two DNS domain names are involved here,
 the DNS name for the advertised link, and
-the DNS hostname for the Discovery Proxy performing the discovery on that advertised link.
+the DNS hostname for the Discovery Proxy responsible for performing discovery on that advertised link.
 These two names are different.
 One names the advertised link; the other names the device making that advertised link visible to clients.
 By default the names for testing are:
@@ -317,7 +317,7 @@ By default the names for testing are:
 ## Configuring and Running the Discovery Proxy
 
 Because the Discovery Proxy uses TLS, a key and certificate are required.
-Currently, for testing, self-signed certificates are allowed.
+Currently self-signed certificates are allowed.
 
 To generate the key and self-signed certificate, use the commands below.
 Replace the hostname discoveryproxy.home.arpa with the actual hostname of the Discovery Proxy device, if you have one.
@@ -366,10 +366,11 @@ This Discovery Proxy, built using
 [DNS Stateful Operations](https://tools.ietf.org/html/rfc8490) and
 [DNS Push Notifications](https://tools.ietf.org/html/draft-ietf-dnssd-push),
 can be used with iOS 13 and macOS Catalina.
-Older versions of iOS and macOS do not include support for
-DNS Stateful Operations and DNS Push Notifications.
-Older versions of iOS and macOS will work with the Discovery Proxy
-but they will not get immediate updates when data changes.
+Older versions of iOS and macOS will work with the Discovery Proxy,
+but since they do not include support for
+DNS Stateful Operations and DNS Push Notifications,
+they will not get immediate updates when data changes
+(like services coming and going on the network).
 
 The client needs to be told in which DNS domains to look for services,
 in addition to “local”
@@ -385,18 +386,21 @@ No manual client configuration is required.
 
 	lb._dns-sd._udp.example.org. PTR my-building.example.org.
 
+In our example setup given above for the GL.iNet AR750S,
+the DHCP server is set to configure client devices
+with a “domain” parameter of “service.home.arpa”,
+and when client devices perform the “lb” query to
+verify whether unicast DNS Service Discovery should be used,
+they receive a positive answer:
+
+	lb._dns-sd._udp.service.home.arpa. PTR service.home.arpa.
+
 There are other ways that automatic configuration can be performed, described in
 [Section 11 of RFC 6763](https://tools.ietf.org/html/rfc6763#section-11).
 
-If you are using the default configuration as we have described earlier, this will
-configure the correct domain; if you are using a different domain, that domain is
-the correct one to specify in this command, rather than service.home.arpa.
-You may need to disconnect from and reassociate with the router's Wifi network to
-get the new setting.
-
 In an operational network, no client configuration is required.
 It is all completely automatic.
-However, for testing, unless you have the necessary DNS records created,
+However, for testing, until you have the necessary DNS records created,
 as described here,
 you can simulate this via some manual client configuration.
 
