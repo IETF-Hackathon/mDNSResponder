@@ -7,10 +7,10 @@ License: Apache-v2
 Section: net
 Maintainer: Ted Lemon <mellon@fugue.com>
 Architecture: mips_24kc
-Installed-Size: 28601
+Installed-Size: 28604
 Filename: dns-sd_2019-07-24-895afe90-5_mips_24kc.ipk
-Size: 29525
-SHA256sum: 72c5afd702c67ff5d06909e55c02c4bbe646beb1123911db6063e10e66db3bcc
+Size: 29530
+SHA256sum: 73286deebe546468a742176b4b2936c7b2f7d063099db17f4dbfe02588a7d00e
 Description:  DNSSD (DNS Service Discovery) is a collection of protocols that allow services to
  advertise their existence and their contact details.  Clients can then discover
  services
@@ -26,10 +26,10 @@ License: Apache-v2
 Section: net
 Maintainer: Ted Lemon <mellon@fugue.com>
 Architecture: mips_24kc
-Installed-Size: 42649
+Installed-Size: 42647
 Filename: dnssd-proxy_2019-07-24-895afe90-5_mips_24kc.ipk
-Size: 43716
-SHA256sum: 8054c49de58e073a9a42b4ac26b303f8637e8600521dbbcda30ccd21ac04921d
+Size: 43707
+SHA256sum: 5bbdf41e4c7a9f9dc9f0de30deaf55bd4b7b537b7f05bc4263a42f7be21993ba
 Description:  DNSSD (DNS Service Discovery) is a collection of protocols that allow services to
  advertise their existence and their contact details.  Clients can then discover
  services
@@ -38,6 +38,71 @@ Description:  DNSSD (DNS Service Discovery) is a collection of protocols that al
  The Discovery Proxy proxies multicast DNS service from one network to another using
  the DNS protocol.   This allows devices on one link to discover services on another
  link.
+
+Package: homenet-full
+Version: 2016-06-28-606d7e904603ad8792ac1a7ba825618df97b5a4e-2
+Depends: libc, homenet-nossl, luci-app-homenet, ip, babeld, miniupnpd, minimalist-pcproxy
+Source: package/network/services/homenet
+SourceName: homenet-full
+License: GPL-2.0
+Section: net
+Maintainer: Steven Barth <cyrus@openwrt.org>
+Architecture: mips_24kc
+Installed-Size: 105
+Filename: homenet-full_2016-06-28-606d7e904603ad8792ac1a7ba825618df97b5a4e-2_mips_24kc.ipk
+Size: 907
+SHA256sum: 6ea9b0566cad3f4a5303936f603c5c490ac9cf02d91b78cbf7f8711b372ae34b
+Description:  HNCP Homenet metapackage
+
+Package: homenet-nossl
+Version: 2016-06-28-606d7e904603ad8792ac1a7ba825618df97b5a4e-2
+Depends: libc, odhcpd, odhcp6c, netifd
+Source: package/network/services/homenet
+SourceName: homenet-nossl
+License: GPL-2.0
+Section: net
+Maintainer: Steven Barth <cyrus@openwrt.org>
+Architecture: mips_24kc
+Installed-Size: 84527
+Filename: homenet-nossl_2016-06-28-606d7e904603ad8792ac1a7ba825618df97b5a4e-2_mips_24kc.ipk
+Size: 85462
+SHA256sum: 0c3d35d987539795b6fa7abf443e6bb05b5d468a20dabf46ce5ae14261659509
+Description:  This package provides a daemon which implementats distributed prefix assignment
+ and service discovery for a home network consisting of multiple routers
+ connected to multiple service providers. It provides a netifd protocol "homenet"
+ for use in /etc/config/network.
+
+Package: libmbedtls2.14.1-1
+Version: 2.14.1-1
+Depends: libc
+Provides: libmbedtls
+Source: package/libs/mbedtls
+SourceName: libmbedtls
+License: GPL-2.0+
+Section: libs
+Architecture: mips_24kc
+Installed-Size: 197292
+Filename: libmbedtls2.14.1-1_2.14.1-1_mips_24kc.ipk
+Size: 197661
+SHA256sum: 5e5ad594376f462c7bdf4412800ebaf98a3be8adeea1f2391558c6ca69c5a900
+Description:  The aim of the mbedtls project is to provide a quality, open-source
+ cryptographic library written in C and targeted at embedded systems.
+ This package contains the mbedtls library.
+
+Package: luci-app-homenet
+Version: 2016-06-28-606d7e904603ad8792ac1a7ba825618df97b5a4e-2
+Depends: libc
+Source: package/network/services/homenet
+SourceName: luci-app-homenet
+License: GPL-2.0
+Section: luci
+Maintainer: Steven Barth <cyrus@openwrt.org>
+Architecture: mips_24kc
+Installed-Size: 56781
+Filename: luci-app-homenet_2016-06-28-606d7e904603ad8792ac1a7ba825618df97b5a4e-2_mips_24kc.ipk
+Size: 57635
+SHA256sum: 65d061ee270bf0c4106c7622ccd429b24ea30e71102d3d108514ee21639b5595
+Description:  HNCP Homenet configuration and visualization
 
 Package: mDNSResponder
 Version: 2019-07-24-895afe90-5
@@ -50,8 +115,8 @@ Maintainer: Ted Lemon <mellon@fugue.com>
 Architecture: mips_24kc
 Installed-Size: 195351
 Filename: mDNSResponder_2019-07-24-895afe90-5_mips_24kc.ipk
-Size: 196306
-SHA256sum: 43ec6fb07eb69200d61e69d432609139e552d20151aa21180ef825c433e1ce05
+Size: 196299
+SHA256sum: 2686d41d86cc39b080fb4f24302eea7bdcee0f781700627813c5d94651a496e1
 Description:  DNSSD (DNS Service Discovery) is a collection of protocols that allow services to
  advertise their existence and their contact details.  Clients can then discover
  services
@@ -61,6 +126,23 @@ Description:  DNSSD (DNS Service Discovery) is a collection of protocols that al
  protocol, and on both local and non-local links using the DNS protocol.  It can
  also be used to publish services on the local link.
 
+Package: mbedtls-util
+Version: 2.14.1-1
+Depends: libc, libmbedtls2.14.1-1
+Source: package/libs/mbedtls
+SourceName: mbedtls-util
+License: GPL-2.0+
+Section: utils
+Architecture: mips_24kc
+Installed-Size: 6702
+Filename: mbedtls-util_2.14.1-1_mips_24kc.ipk
+Size: 7574
+SHA256sum: fdb21d85c8829336714a7718d11406ce5690c023907e8f244f78323167e2db01
+Description:  The aim of the mbedtls project is to provide a quality, open-source
+ cryptographic library written in C and targeted at embedded systems.
+ This package contains mbedtls helper programs for private key and
+ CSR generation (gen_key, cert_req)
+
 Package: mbedtls-write
 Version: 2.14.1-1
 Depends: libc, libmbedtls2.14.1-1
@@ -69,10 +151,10 @@ SourceName: mbedtls-write
 License: GPL-2.0+
 Section: cert_write
 Architecture: mips_24kc
-Installed-Size: 5723
+Installed-Size: 5729
 Filename: mbedtls-write_2.14.1-1_mips_24kc.ipk
-Size: 6537
-SHA256sum: 85584debb4d01f143b7fed8d17031c6b008f61f0f20aa48aa4cf856846a0b033
+Size: 6552
+SHA256sum: d7f2d4c4502e247a04d2aaa5aa646a1435fab3d474d852ee1c26f04b0e027ec5
 Description:  The aim of the mbedtls project is to provide a quality, open-source
  cryptographic library written in C and targeted at embedded systems.
  This package contains an mbedtls helper program to self-sign a cert.
