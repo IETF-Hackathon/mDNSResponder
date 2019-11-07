@@ -1,55 +1,136 @@
 Package: dns-sd
-Version: 5
-Depends: libc, libc, libmbedtls2.14.1-1
-License: Apache-2.0
+Version: 2019-07-24-895afe90-5
+Depends: libc, libc, libmbedtls
+License: Apache-v2
 Section: net
 Architecture: mips_24kc
-Installed-Size: 28586
-Filename: dns-sd_5_mips_24kc.ipk
-Size: 29434
-SHA256sum: 623bf8d12a955bf9a948540e40985a858b114d18db39cb7e27e27990f4537c22
-Description:  mDNSResponder is the Apple implementation of a DNSSD service discovery agent.  
+Installed-Size: 28604
+Filename: dns-sd_2019-07-24-895afe90-5_mips_24kc.ipk
+Size: 29518
+SHA256sum: b8c53db55184711e00a6ed661da02ee27ac95d69ee31104599c8762df8637689
+Description:  DNSSD (DNS Service Discovery) is a collection of protocols that allow services to
+ advertise their existence and their contact details.  Clients can then discover
+ services
+ 
  dns-sd is a command line tool for querying the agent when it is running.
 
 Package: dnssd-proxy
-Version: 5
-Depends: libc, libc, libmbedtls2.14.1-1, mDNSResponder
-License: Apache-2.0
+Version: 2019-07-24-895afe90-5
+Depends: libc, libc, libmbedtls, mDNSResponder, mbedtls-write, mbedtls-util
+License: Apache-v2
 Section: net
 Architecture: mips_24kc
-Installed-Size: 40594
-Filename: dnssd-proxy_5_mips_24kc.ipk
-Size: 41454
-SHA256sum: 8bb78b4f047857037ade0e010c510773a6533ba45ce8c3b3ef3e732f86c465b0
-Description:  DNSSD-Proxy is a reference implementation of the IETF DNS Service Discovery Proxy.
+Installed-Size: 42647
+Filename: dnssd-proxy_2019-07-24-895afe90-5_mips_24kc.ipk
+Size: 43693
+SHA256sum: b712ef104fef2189054648a68667a56b390e1067b71985de37ad08ae39f0ecad
+Description:  DNSSD (DNS Service Discovery) is a collection of protocols that allow services to
+ advertise their existence and their contact details.  Clients can then discover
+ services
+ 
+ DNSSD-Proxy is a reference implementation of the IETF DNS Service Discovery Proxy.
  The Discovery Proxy proxies multicast DNS service from one network to another using
  the DNS protocol.   This allows devices on one link to discover services on another
  link.
 
-Package: mDNSResponder
-Version: 5
-Depends: libc, libc, libmbedtls2.14.1-1
-License: Apache-2.0
+Package: homenet-full
+Version: 2016-06-28-606d7e904603ad8792ac1a7ba825618df97b5a4e-2
+Depends: libc, homenet-nossl, luci-app-homenet, ip, babeld, miniupnpd, minimalist-pcproxy
+License: GPL-2.0
 Section: net
 Architecture: mips_24kc
-Installed-Size: 195345
-Filename: mDNSResponder_5_mips_24kc.ipk
-Size: 196175
-SHA256sum: c38ee37c5e2647045c4e8beb29015f285f518f05ea6dcd305965cb079d7ee3dc
-Description:  mDNSResponder is the Apple implementation of a DNSSD service discovery agent.   It
+Installed-Size: 105
+Filename: homenet-full_2016-06-28-606d7e904603ad8792ac1a7ba825618df97b5a4e-2_mips_24kc.ipk
+Size: 906
+SHA256sum: b78216065f9401b4f13d34c85f91e10826c4f6965d68ab213d62e905ced32156
+Description:  HNCP Homenet metapackage
+
+Package: homenet-nossl
+Version: 2016-06-28-606d7e904603ad8792ac1a7ba825618df97b5a4e-2
+Depends: libc, odhcpd, odhcp6c, netifd
+License: GPL-2.0
+Section: net
+Architecture: mips_24kc
+Installed-Size: 84533
+Filename: homenet-nossl_2016-06-28-606d7e904603ad8792ac1a7ba825618df97b5a4e-2_mips_24kc.ipk
+Size: 85444
+SHA256sum: f71a24f2ed6576c91fd21bc49b13f4b0c08112a0d3bf9b8109188acd0d50bb74
+Description:  This package provides a daemon which implementats distributed prefix assignment
+ and service discovery for a home network consisting of multiple routers
+ connected to multiple service providers. It provides a netifd protocol "homenet"
+ for use in /etc/config/network.
+
+Package: libmbedtls
+Version: 2.14.1-1
+Depends: libc
+License: GPL-2.0+
+Section: libs
+Architecture: mips_24kc
+Installed-Size: 197292
+Filename: libmbedtls_2.14.1-1_mips_24kc.ipk
+Size: 197655
+SHA256sum: 564ba6fec08f6a7d7ccceaaea898dde6ab74e890db187f2524f86c80774de288
+Description:  The aim of the mbedtls project is to provide a quality, open-source
+ cryptographic library written in C and targeted at embedded systems.
+ This package contains the mbedtls library.
+
+Package: luci-app-homenet
+Version: 2016-06-28-606d7e904603ad8792ac1a7ba825618df97b5a4e-2
+Depends: libc
+License: GPL-2.0
+Section: luci
+Architecture: mips_24kc
+Installed-Size: 56783
+Filename: luci-app-homenet_2016-06-28-606d7e904603ad8792ac1a7ba825618df97b5a4e-2_mips_24kc.ipk
+Size: 57641
+SHA256sum: 48cf229999f360fbc25a4de980e6b6aaa6b80fe0bcc0897e06ae3f4b20395570
+Description:  HNCP Homenet configuration and visualization
+
+Package: mDNSResponder
+Version: 2019-07-24-895afe90-5
+Depends: libc, libc, libmbedtls
+License: Apache-v2
+Section: net
+Architecture: mips_24kc
+Installed-Size: 195351
+Filename: mDNSResponder_2019-07-24-895afe90-5_mips_24kc.ipk
+Size: 196293
+SHA256sum: 3263fd1763c3c82e282d09146693cb01bc08132be51a774069100eae0c1c74ca
+Description:  DNSSD (DNS Service Discovery) is a collection of protocols that allow services to
+ advertise their existence and their contact details.  Clients can then discover
+ services
+ 
+ mDNSResponder is the Apple implementation of a DNSSD service discovery agent.   It
  can be used to discover services both on the local link using the Multicast DNS
- protocol, and on both local and non-local links using the DNS protocol.
+ protocol, and on both local and non-local links using the DNS protocol.  It can
+ also be used to publish services on the local link.
+
+Package: mbedtls-util
+Version: 2.14.1-1
+Depends: libc, libmbedtls
+License: GPL-2.0+
+Section: utils
+Architecture: mips_24kc
+Installed-Size: 6702
+Filename: mbedtls-util_2.14.1-1_mips_24kc.ipk
+Size: 7569
+SHA256sum: 86c471ca7f39a9f5a11f114fe139c5ad86f585688483d324523d57f1024a40b3
+Description:  The aim of the mbedtls project is to provide a quality, open-source
+ cryptographic library written in C and targeted at embedded systems.
+ This package contains mbedtls helper programs for private key and
+ CSR generation (gen_key, cert_req)
 
 Package: mbedtls-write
 Version: 2.14.1-1
-Depends: libc, libmbedtls2.14.1-1
+Depends: libc, libmbedtls
 License: GPL-2.0+
 Section: cert_write
 Architecture: mips_24kc
-Installed-Size: 5723
+Installed-Size: 5729
 Filename: mbedtls-write_2.14.1-1_mips_24kc.ipk
-Size: 6537
-SHA256sum: 85584debb4d01f143b7fed8d17031c6b008f61f0f20aa48aa4cf856846a0b033
+Size: 6549
+SHA256sum: 6ae8dfdd2d4821683fa85cf1e207176042edf6f93a9d1f3a7d88b3519130465c
 Description:  The aim of the mbedtls project is to provide a quality, open-source
  cryptographic library written in C and targeted at embedded systems.
  This package contains an mbedtls helper program to self-sign a cert.
+

@@ -1,5 +1,7 @@
 BUILDDIR = build
 OBJDIR = objects
+GENKEY=\"/usr/local/bin/mbedtls_gen_key\"
+CERTWRITE=\"/usr/local/bin/mbedtls_cert_write\"
 
 ifndef os
   SYSTEM := $(shell uname -s)
@@ -24,13 +26,13 @@ endif
 CP?=/bin/cp
 
 ifeq ($(os),x)
-SRPCFLAGS = -O0 -g -Wall -Werror -DSTANDALONE -I../mDNSCore -I/usr/local/include -I. -I../mDNSShared -I../DSO -MMD -MF .depfile-${notdir $<} -DUSE_KQUEUE -DHAVE_SOCKADDR_DL
+SRPCFLAGS = -O0 -g -Wall -Werror -DSTANDALONE -I../mDNSCore -I/usr/local/include -I. -I../mDNSShared -I../DSO -MMD -MF .depfile-${notdir $<} -DUSE_KQUEUE -DHAVE_SOCKADDR_DL -DGENKEY_PROGRAM=$(GENKEY) -DCERTWRITE_PROGRAM=$(CERTWRITE)
 SRPLDOPTS = -lmbedcrypto -lmbedtls -lmbedx509
 else ifeq ($(os), linux)
-SRPCFLAGS = -DMDNS_UDS_SERVERPATH=\"/var/run/mdnsd\" -O0 -g -Wall -Werror -DSTANDALONE -I../mDNSCore -I/usr/local/include -I. -I../mDNSShared -I../DSO -MMD -MF .depfile-${notdir $<} -DNOT_HAVE_SA_LEN -DUSE_SELECT -DUSE_INOTIFY
+SRPCFLAGS = -DMDNS_UDS_SERVERPATH=\"/var/run/mdnsd\" -O0 -g -Wall -Werror -DSTANDALONE -I../mDNSCore -I/usr/local/include -I. -I../mDNSShared -I../DSO -MMD -MF .depfile-${notdir $<} -DNOT_HAVE_SA_LEN -DUSE_SELECT -DUSE_INOTIFY -DGENKEY_PROGRAM=$(GENKEY) -DCERTWRITE_PROGRAM=$(CERTWRITE)
 SRPLDOPTS = -lmbedcrypto -lmbedtls -lmbedx509
 else ifeq ($(os), linux-uclibc)
-SRPCFLAGS = -DMDNS_UDS_SERVERPATH=\"/var/run/mdnsd\" -O0 -g -Wall -Werror -DSTANDALONE -I../mDNSCore -I/usr/local/include -I. -I../mDNSShared -I../DSO -MMD -MF .depfile-${notdir $<} -DNOT_HAVE_SA_LEN -DUSE_SELECT -DLINUX_GETENTROPY
+SRPCFLAGS = -DMDNS_UDS_SERVERPATH=\"/var/run/mdnsd\" -O0 -g -Wall -Werror -DSTANDALONE -I../mDNSCore -I/usr/local/include -I. -I../mDNSShared -I../DSO -MMD -MF .depfile-${notdir $<} -DNOT_HAVE_SA_LEN -DUSE_SELECT -DLINUX_GETENTROPY -DGENKEY_PROGRAM=$(GENKEY) -DCERTWRITE_PROGRAM=$(CERTWRITE)
 SRPLDOPTS = -lmbedcrypto -lmbedtls -lmbedx509
 else ifeq ($(os), raspbian)
 SRPCFLAGS = -DMDNS_UDS_SERVERPATH=\"/var/run/mdnsd\" -O0 -g -Wall -Werror -DSTANDALONE -I../mDNSCore -I/usr/local/include -I. -I../mDNSShared -I../DSO -MMD -MF .depfile-${notdir $<} -DNOT_HAVE_SA_LEN -DUSE_SELECT -DLINUX_GETENTROPY -DGENKEY_PROGRAM=$(GENKEY) -DCERTWRITE_PROGRAM=$(CERTWRITE)
@@ -74,7 +76,7 @@ $(BUILDDIR)/dnssd-proxy:  $(OBJDIR)/dnssd-proxy.o $(SIMPLEOBJS) $(DSOOBJS) $(MDN
 $(BUILDDIR)/srp-simple:	$(OBJDIR)/srp-simple.o $(SIMPLEOBJS)
 	$(CC) -o $@ $+ $(SRPLDOPTS)
 
-$(BUILDDIR)/srp-gw:	$(OBJDIR)/srp-gw.o $(SIMPLEOBJS) $(FROMWIREOBJS) $(IOOBJS) $(HMACOBJS) $(CFOBJS)
+$(BUILDDIR)/srp-gw:	$(OBJDIR)/srp-gw.o $(OBJDIR)/srp-parse.o $(SIMPLEOBJS) $(FROMWIREOBJS) $(IOOBJS) $(HMACOBJS) $(CFOBJS)
 	$(CC) -o $@ $+ $(SRPLDOPTS)
 
 $(BUILDDIR)/keydump:	$(OBJDIR)/keydump.o $(SIMPLEOBJS) $(FROMWIREOBJS)
@@ -104,6 +106,7 @@ $(OBJDIR)/%.o:	%.c
 -include .depfile-sign-mbedtls.c
 -include .depfile-srp-gw.c
 -include .depfile-srp-simple.c
+-include .depfile-srp-parse.c
 -include .depfile-tls-mbedtls.c
 -include .depfile-towire.c
 -include .depfile-verify-mbedtls.c

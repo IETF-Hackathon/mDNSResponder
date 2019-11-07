@@ -14,7 +14,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
- * This is a DNSSD Service Registration Protocol update proxy.   The purpose of this is to make it possible
+ * This is a DNSSD Service Registration Protocol gateway.   The purpose of this is to make it possible
  * for SRP clients to update DNS servers that don't support SRP.
  *
  * The way it works is that this gateway listens on port ANY:53 and forwards either to another port on
@@ -62,6 +62,7 @@
 #include "config-parse.h"
 
 static addr_t dns_server;
+static dns_name_t *service_update_zone; // The zone to update when we receive an update for default.service.arpa.
 static hmac_key_t *key;
 
 static int
@@ -81,6 +82,49 @@ usage(const char *progname)
     ERROR("ex: srp-gw -s 2001:DB8::1 53 -k srp.key -t 2001:DB8:1300::/48 -u en0 2001:DB8:1300:1100::/56");
     return 1;
 }
+
+// Free the data structures into which the SRP update was parsed.   The pointers to the various DNS objects that these
+// structures point to are owned by the parsed DNS message, and so these do not need to be freed here.
+void
+update_free_parts(service_instance_t *service_instances, service_instance_t *added_instances,
+                  service_t *services, dns_host_description_t *host_description)
+{
+    service_instance_t *sip;
+    service_t *sp;
+
+    for (sip = service_instances; sip; ) {
+        service_instance_t *next = sip->next;
+        free(sip);
+        sip = next;
+    }
+    for (sip = added_instances; sip; ) {
+        service_instance_t *next = sip->next;
+        free(sip);
+        sip = next;
+    }
+    for (sp = services; sp; ) {
+        service_t *next = sp->next;
+        free(sp);
+        sp = next;
+    }
+    if (host_description != NULL) {
+        free(host_description);
+    }
+}
+
+// Free all the stuff that we accumulated while processing the SRP update.
+void
+update_free(update_t *update)
+{
+    // Free all of the structures we collated RRs into:
+    update_free_parts(update->instances, update->added_instances, update->services, update->host);
+    // We don't need to free the zone name: it's either borrowed from the message,
+    // or it's service_update_zone, which is static.
+    message_free(update->message);
+    dns_message_free(update->parsed_message);
+    free(update);
+}
+
 
 #define name_to_wire(towire, name) name_to_wire_(towire, name, __LINE__)
 void
@@ -125,11 +169,11 @@ rdata_to_wire(dns_towire_state_t *towire, dns_rr_t *rr)
         break;
 
     case dns_rrtype_a:
-        dns_rdata_raw_data_to_wire(towire, &rr->data.a, sizeof rr->data.a);
+        dns_rdata_raw_data_to_wire(towire, rr->data.a.addrs, sizeof *rr->data.a.addrs);
         break;
 
     case dns_rrtype_aaaa:
-        dns_rdata_raw_data_to_wire(towire, &rr->data.aaaa, sizeof rr->data.aaaa);
+        dns_rdata_raw_data_to_wire(towire, rr->data.aaaa.addrs, sizeof *rr->data.aaaa.addrs);
         break;
     }
 
@@ -283,7 +327,6 @@ construct_update(update_t *update)
     dns_wire_t *msg = update->update; // Solely to reduce the amount of typing.
     service_instance_t *instance;
     service_t *service;
-    dns_addr_reg_t *reg;
 
     // Set up the message constructor
     memset(&towire, 0, sizeof towire);
@@ -335,12 +378,8 @@ construct_update(update_t *update)
         }
         // Add the host records...
         add_rr(msg, &towire, update->host->name, update->host->key);
-        for (reg = update->host->a; reg; reg = reg->next) {
-            add_rr(msg, &towire, update->host->name, reg->rr);
-        }
-        for (reg = update->host->aaaa; reg; reg = reg->next) {
-            add_rr(msg, &towire, update->host->name, reg->rr);
-        }
+        add_rr(msg, &towire, update->host->name, update->host->a);
+        add_rr(msg, &towire, update->host->name, update->host->aaaa);
         break;
 
     case create_nonexistent:
@@ -383,12 +422,8 @@ construct_update(update_t *update)
     add_host:
         // Add the host records...
         add_rr(msg, &towire, update->host->name, update->host->key);
-        for (reg = update->host->a; reg; reg = reg->next) {
-            add_rr(msg, &towire, update->host->name, reg->rr);
-        }
-        for (reg = update->host->aaaa; reg; reg = reg->next) {
-            add_rr(msg, &towire, update->host->name, reg->rr);
-        }
+        add_rr(msg, &towire, update->host->name, update->host->a);
+        add_rr(msg, &towire, update->host->name, update->host->aaaa);
         break;
 
     case delete_failed_instance:
@@ -439,7 +474,7 @@ update_finished(update_t *update, int rcode)
     // This would mean that there is nothing to signal: either the instance is a mismatch, and we
     // overwrite it and return success, or the host is a mismatch and we gc the instance and return failure.
     ioloop_close(&update->server->io);
-    srp_update_free(update);
+    update_free(update);
 }
 
 void
@@ -867,86 +902,7 @@ srp_update_start(comm_t *connection, dns_message_t *parsed_message, dns_host_des
         free(update);
         return false;
     }
-    return true;
-}
-
-static bool
-key_handler(void *context, const char *filename, char **hunks, int num_hunks, int lineno)
-{
-    hmac_key_t *key = context;
-    long val;
-    char *endptr;
-    size_t len;
-    uint8_t keybuf[SRP_SHA256_DIGEST_SIZE];
-    int error;
-
-    // Validate the constant-size stuff first.
-    if (strcasecmp(hunks[1], "in")) {
-        ERROR("Expecting tsig key class IN, got %s.", hunks[1]);
-        return false;
-    }
-
-    if (strcasecmp(hunks[2], "key")) {
-        ERROR("expecting tsig key type KEY, got %s", hunks[2]);
-        return false;
-    }
-
-    // There's not much meaning to be extracted from the flags.
-    val = strtol(hunks[3], &endptr, 10);
-    if (*endptr != 0 || endptr == hunks[3]) {
-        ERROR("Invalid key flags: %s", hunks[3]);
-        return false;
-    }
-    
-    // The protocol number as produced by BIND will always be 3, meaning DNSSEC, but of
-    // course we aren't using this key for DNSSEC, so it's not clear that we should take
-    // this seriously; hence we just check to see that it's a number.
-    val = strtol(hunks[4], &endptr, 10);
-    if (*endptr != 0 || endptr == hunks[4]) {
-        ERROR("Invalid protocol number: %s", hunks[4]);
-        return false;
-    }
-    
-    // The key algorithm should be HMAC-SHA253.  BIND uses 163, but this is not registered
-    // with IANA.   So again, we don't actually require this, but we do validate it so that
-    // if someone generated the wrong key type, they'll get a message.
-    val = strtol(hunks[5], &endptr, 10);
-    if (*endptr != 0 || endptr == hunks[5]) {
-        ERROR("Invalid protocol number: %s", hunks[5]);
-        return false;
-    }
-    if (val != 163) {
-        INFO("Warning: Protocol number for HMAC-SHA256 TSIG KEY is not 163, but %ld", val);
-    }
-    
-    key->name = dns_pres_name_parse(hunks[0]);
-    if (key->name == NULL) {
-        ERROR("Invalid key name: %s", hunks[0]);
-        return false;
-    }
-
-    error = srp_base64_parse(hunks[6], &len, keybuf, sizeof keybuf);
-    if (error != 0) {
-        ERROR("Invalid HMAC-SHA256 key: %s", strerror(errno));
-        goto fail;
-    }
-    
-    // The key should be 32 bytes (256 bits).
-    if (len == 0) {
-        ERROR("Invalid (null) secret for key %s", hunks[0]);
-        goto fail;
-    }
-    key->secret = malloc(len);
-    if (key->secret == NULL) {
-        ERROR("Unable to allocate space for secret for key %s", hunks[0]);
-    fail:
-        dns_name_free(key->name);
-        key->name = NULL;
-        return false;
-    }
-    memcpy(key->secret, keybuf, len);
-    key->length = len;
-    key->algorithm = SRP_HMAC_TYPE_SHA256;
+    INFO("Connecting to auth server.");
     return true;
 }
 
@@ -985,7 +941,10 @@ main(int argc, char **argv)
     socklen_t len, prefalen;
     char *s, *p;
     int width;
+    uint16_t listen_port;
     bool got_server = false;
+
+    listen_port = htons(53);
 
     // Read the configuration from the command line.
     for (i = 1; i < argc; i++) {
@@ -1109,9 +1068,35 @@ main(int argc, char **argv)
         return 1;
     }
 
-    if (!srp_proxy_listen()) {
+    // Set up listeners
+    // XXX UDP listeners should bind to interface addresses, not INADDR_ANY.
+    if (!setup_listener_socket(AF_INET, IPPROTO_UDP, false, listen_port, NULL, NULL, "UDPv4 listener", dns_input, 0, 0)) {
+        ERROR("UDPv4 listener: fail.");
         return 1;
     }
+    if (!setup_listener_socket(AF_INET6, IPPROTO_UDP, false, listen_port, NULL, NULL, "UDPv6 listener", dns_input, 0, 0)) {
+        ERROR("UDPv6 listener: fail.");
+        return 1;
+    }
+    if (!setup_listener_socket(AF_INET, IPPROTO_TCP, false, listen_port, NULL, NULL, "TCPv4 listener", dns_input, 0, 0)) {
+        ERROR("TCPv4 listener: fail.");
+        return 1;
+    }
+    if (!setup_listener_socket(AF_INET6, IPPROTO_TCP, false, listen_port, NULL, NULL, "TCPv6 listener", dns_input, 0, 0)) {
+        ERROR("TCPv6 listener: fail.");
+        return 1;
+    }
+    if (!setup_listener_socket(AF_INET, IPPROTO_TCP, true, listen_port, NULL, NULL, "TLSv4 listener", dns_input, 0, 0)) {
+        ERROR("TLSv4 listener: fail.");
+        return 1;
+    }
+    if (!setup_listener_socket(AF_INET6, IPPROTO_TCP, true, listen_port, NULL, NULL, "TLSv6 listener", dns_input, 0, 0)) {
+        ERROR("TLSv6 listener: fail.");
+        return 1;
+    }
+    
+    // For now, hardcoded, should be configurable
+    service_update_zone = dns_pres_name_parse("home.arpa");
 
     do {
         int something = 0;

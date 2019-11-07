@@ -44,6 +44,7 @@
 #include <sys/types.h>
 #include <ifaddrs.h>
 #include <net/if.h>
+#include <stdarg.h>
 
 #include "dns_sd.h"
 #include "srp.h"
@@ -71,6 +72,8 @@ int num_publish_addrs = 0;
 char *tls_cacert_filename = NULL;
 char *tls_cert_filename = "/etc/dnssd-proxy/server.crt";
 char *tls_key_filename = "/etc/dnssd-proxy/server.key";
+comm_t *listener[4 + MAX_ADDRS];
+int num_listeners = 0;
 
 typedef struct hardwired hardwired_t;
 struct hardwired {
@@ -110,7 +113,7 @@ typedef struct dnssd_query {
     io_t io;
     DNSServiceRef ref;
     char *name;                     // The name we are looking up.
-    served_domain_t *iface;      // If this is a local query, the interface for the query
+    served_domain_t *served_domain; // If this query matches an enclosing domain, the domain that matched.
 
                                     // If we've already copied out the enclosing domain once in a DNS message.
     dns_name_pointer_t enclosing_domain_pointer;
@@ -166,7 +169,10 @@ void
 dnssd_query_finalize(io_t *io)
 {
     dnssd_query_t *query = (dnssd_query_t *)io;
-    INFO("dnssd_query_finalize on %s%s", query->name, query->iface ? ".local" : "");
+    INFO("dnssd_query_finalize on %s%s",
+         query->name, (query->served_domain
+                       ? (query->served_domain->interface ? ".local" : query->served_domain->domain_ld)
+                       : ""));
     if (query->question) {
         message_free(query->question);
     }
@@ -180,7 +186,10 @@ dnssd_query_callback(io_t *io)
     dnssd_query_t *query = (dnssd_query_t *)io;
     int status = DNSServiceProcessResult(query->ref);
     if (status != kDNSServiceErr_NoError) {
-        ERROR("DNSServiceProcessResult on %s%s returned %d", query->name, query->iface ? ".local" : "", status);
+        ERROR("DNSServiceProcessResult on %s%s returned %d",
+              query->name, (query->served_domain != NULL
+                            ? (query->served_domain->interface != NULL ? ".local" : query->served_domain->domain_ld)
+                            : ""), status);
         if (query->activity != NULL && query->connection != NULL) {
             dso_drop_activity(query->connection->dso, query->activity);
         } else {
@@ -284,13 +293,13 @@ dp_query_add_data_to_response(dnssd_query_t *query, const char *fullname,
     }
     // Don't send A records for 127.* nor AAAA records for ::1
     if (rrtype == dns_rrtype_a && rdlen == 4) {
-        struct in_addr addr;
-        addr = *(struct in_addr *)rdata;
-        if (IN_LOOPBACK(&addr)) {
+        // Should use IN_LINKLOCAL and IN_LOOPBACK macros here, but for some reason they are not present on
+        // OpenWRT.
+        if (rd[0] == 127) {
             INFO("Eliding localhost response for %s: %d.%d.%d.%d", fullname, rd[0], rd[1], rd[2], rd[3]);
             return;
         }
-        if (IN_LINKLOCAL(&addr)) {
+        if (rd[0] == 169 && rd[1] == 254) {
             INFO("Eliding link-local response for %s: %d.%d.%d.%d", fullname, rd[0], rd[1], rd[2], rd[3]);
             return;
         }
@@ -311,11 +320,11 @@ dp_query_add_data_to_response(dnssd_query_t *query, const char *fullname,
     INFO("dp_query_add_data_to_response: survived for rrtype %d rdlen %d", rrtype, rdlen);
 
     // Rewrite the domain if it's .local.
-    if (query->iface != NULL) {
+    if (query->served_domain != NULL) {
         TOWIRE_CHECK("concatenate_name_to_wire", towire,
-                     dns_concatenate_name_to_wire(towire, NULL, query->name, query->iface->domain));
+                     dns_concatenate_name_to_wire(towire, NULL, query->name, query->served_domain->domain));
         INFO("%s answer:  type %02d class %02d %s.%s", query->is_dns_push ? "PUSH" : "DNS ",
-             rrtype, rrclass, query->name, query->iface->domain);
+             rrtype, rrclass, query->name, query->served_domain->domain);
     } else {
         TOWIRE_CHECK("compress_name_to_wire", towire, dns_concatenate_name_to_wire(towire, NULL, NULL, query->name));
         INFO("%s answer:  type %02d class %02d %s (p)",
@@ -370,8 +379,8 @@ dp_query_add_data_to_response(dnssd_query_t *query, const char *fullname,
             // If the name ended in .local, concatenate the interface domain name to the end.
             if (local) {
                 TOWIRE_CHECK("concatenate_name_to_wire 2", towire,
-                             dns_concatenate_name_to_wire(towire, name, NULL, query->iface->domain));
-                INFO("translating %s to %s . %s", rbuf, pbuf, query->iface->domain);
+                             dns_concatenate_name_to_wire(towire, name, NULL, query->served_domain->domain));
+                INFO("translating %s to %s . %s", rbuf, pbuf, query->served_domain->domain);
             } else {
                 TOWIRE_CHECK("concatenate_name_to_wire 2", towire,
                              dns_concatenate_name_to_wire(towire, name, NULL, NULL));
@@ -398,11 +407,24 @@ void
 dnssd_hardwired_add(served_domain_t *sdt,
                     const char *name, const char *domain, size_t rdlen, uint8_t *rdata, uint16_t type)
 {
-    hardwired_t *hp;
+    hardwired_t *hp, **hrp;
     int namelen = strlen(name);
-    size_t total = (sizeof *hp) + rdlen + namelen * 2 + 2 + strlen(namelen == 0 ? sdt->domain : sdt->domain_ld);
+    size_t total = sizeof *hp;
+    uint8_t *trailer;
+    total += rdlen; // Space for RDATA
+    total += namelen; // Space for name
+    total += 1; // NUL
+    total += namelen;// space for FQDN
+    total += strlen(domain);
+    total += 1; // NUL
 
-    hp = calloc(1, total);
+    hp = calloc(1, total + 4);
+    if (hp == NULL) {
+        ERROR("no memory for %s %s", name, domain);
+        return;
+    }
+    trailer = ((uint8_t *)hp) + total;
+    memcpy(trailer, "abcd", 4);
     hp->rdata = (uint8_t *)(hp + 1);
     hp->rdlen = rdlen;
     memcpy(hp->rdata, rdata, rdlen);
@@ -411,16 +433,33 @@ dnssd_hardwired_add(served_domain_t *sdt,
     hp->fullname = hp->name + namelen + 1;
     if (namelen != 0) {
         strcpy(hp->fullname, name);
-        strcpy(hp->fullname + namelen, sdt->domain_ld);
+        strcpy(hp->fullname + namelen, domain);
     } else {
-        strcpy(hp->fullname, sdt->domain);
+        strcpy(hp->fullname, domain);
     }
     if (hp->fullname + strlen(hp->fullname) + 1 != (char *)hp + total) {
         ERROR("%p != %p", hp->fullname + strlen(hp->fullname) + 1, ((char *)hp) + total);
+        return;
+    }
+    if (memcmp(trailer, "abcd", 4)) {
+        ERROR("ran off the end.");
+        return;
     }
     hp->type = type;
-    hp->next = sdt->hardwired_responses;
-    sdt->hardwired_responses = hp;
+    hp->next = NULL;
+
+    // Store this new hardwired_t at the end of the list unless a hardwired_t with the same name
+    // is already on the list.   If it is, splice it in.
+    for (hrp = &sdt->hardwired_responses; *hrp != NULL; hrp = &(*hrp)->next) {
+        hardwired_t *old = *hrp;
+        if (!strcmp(old->fullname, hp->name) && old->type == hp->type) {
+            INFO("hardwired_add: superseding %s name %s type %d rdlen %d", old->fullname, old->name, old->type, old->rdlen);
+            hp->next = old->next;
+            free(old);
+            break;
+        }
+    }
+    *hrp = hp;
 
     INFO("hardwired_add: fullname %s name %s type %d rdlen %d", hp->fullname, hp->name, hp->type, hp->rdlen);
 }
@@ -444,6 +483,7 @@ void dnssd_hardwired_lbdomains_setup(dns_towire_state_t *towire, dns_wire_t *wir
             continue;
         }
         INFO("Interface %s", interface->name);
+        // Add lb domain support for link domain
         for (ifaddr = interface->addresses; ifaddr != NULL; ifaddr = ifaddr->next) {
             if (ifaddr->addr.sa.sa_family == AF_INET) {
                 uint8_t *address = (uint8_t *)&(ifaddr->addr.sin.sin_addr);
@@ -452,12 +492,12 @@ void dnssd_hardwired_lbdomains_setup(dns_towire_state_t *towire, dns_wire_t *wir
                 int space = sizeof name;
                 int i;
 
-                if (IN_LOOPBACK(&ifaddr->addr.sin.sin_addr)) {
+                if (address[0] == 127) {
                     INFO("Skipping IPv4 loopback address on %s (%s)", addr_domain->domain, interface->name);
                     continue;
                 }
 
-                if (IN_LINKLOCAL(&ifaddr->addr.sin.sin_addr)) {
+                if (address[0] == 169 && address[1] == 254) {
                     INFO("Skipping IPv4 link local address on %s (%s)", addr_domain->domain, interface->name);
                     continue;
                 }
@@ -491,7 +531,7 @@ void dnssd_hardwired_lbdomains_setup(dns_towire_state_t *towire, dns_wire_t *wir
                 uint8_t *mask = (uint8_t *)&(ifaddr->mask.sin6.sin6_addr);
                 char *bp;
                 int space = sizeof name;
-                int i, word, ishift, shift;
+                int i, word, shift;
 
                 if (IN6_IS_ADDR_LOOPBACK(&ifaddr->addr.sin6.sin6_addr)) {
                     INFO("Skipping IPv6 link local address on %s (%s)", addr_domain->domain, interface->name);
@@ -510,7 +550,6 @@ void dnssd_hardwired_lbdomains_setup(dns_towire_state_t *towire, dns_wire_t *wir
                                 (address[word] >> shift) & (mask[word] >> shift) & 15);
                         bp += strlen(bp);
                     }
-                    ishift = 0;
                 }
                 if (ip6 == NULL) {
                     ip6 = new_served_domain(NULL, "ip6.arpa.");
@@ -549,6 +588,7 @@ dnssd_hardwired_setup(void)
     dns_name_t *my_name_parsed = my_name == NULL ? NULL : dns_pres_name_parse(my_name);
     char namebuf[DNS_MAX_NAME_SIZE + 1];
     const char *local_name = my_name;
+    addr_t addr;
 
 #define RESET \
     memset(&towire, 0, sizeof towire); \
@@ -562,12 +602,6 @@ dnssd_hardwired_setup(void)
             continue;
         }
         
-        // Browsing pointers...
-        RESET;
-        dns_full_name_to_wire(NULL, &towire, sdt->domain);
-        dnssd_hardwired_add(sdt, "b._dns-sd._udp", sdt->domain_ld, towire.p - wire.data, wire.data, dns_rrtype_ptr);
-        dnssd_hardwired_add(sdt, "lb._dns-sd._udp", sdt->domain_ld, towire.p - wire.data, wire.data, dns_rrtype_ptr);
-
         // SRV
         // _dns-llq._udp
         // _dns-llq-tls._tcp
@@ -582,44 +616,10 @@ dnssd_hardwired_setup(void)
         dnssd_hardwired_add(sdt, "_dns-update._udp", sdt->domain_ld, towire.p - wire.data, wire.data, dns_rrtype_srv);
         dnssd_hardwired_add(sdt, "_dns-update-tls._tcp", sdt->domain_ld, towire.p - wire.data, wire.data, dns_rrtype_srv);
     
-        if (sdt->interface->no_push) {
-            dnssd_hardwired_add(sdt, "_dns-push-tls._tcp", sdt->domain_ld, towire.p - wire.data, wire.data, dns_rrtype_srv);
-        } else {
-            // SRV
-            // _dns-push._tcp
-            RESET;
-            dns_u16_to_wire(&towire, 0); // priority
-            dns_u16_to_wire(&towire, 0); // weight
-            dns_u16_to_wire(&towire, 53); // port
-            // Define my_name in the config file to reference a name for this server in a different zone.
-            if (my_name == NULL) {
-                dns_name_to_wire(NULL, &towire, "ns");
-                dns_full_name_to_wire(NULL, &towire, sdt->domain);
-            } else {
-                dns_full_name_to_wire(NULL, &towire, my_name);
-            }
-            dnssd_hardwired_add(sdt, "_dns-push._tcp", sdt->domain_ld, towire.p - wire.data, wire.data, dns_rrtype_srv);
+        // Until we set up the DNS Push listener, we deny its existence.   If TLS is ready to go, this will be overwritten
+        // immediately; otherwise it will be overwritten when the TLS key has been generated and signed.
+        dnssd_hardwired_add(sdt, "_dns-push-tls._tcp", sdt->domain_ld, towire.p - wire.data, wire.data, dns_rrtype_srv);
 
-            // SRV
-            // _dns-push-tls._tcp
-            RESET;
-            dns_u16_to_wire(&towire, 0); // priority
-            dns_u16_to_wire(&towire, 0); // weight
-            dns_u16_to_wire(&towire, 853); // port
-            // Define my_name in the config file to reference a name for this server in a different zone.
-            if (my_name == NULL) {
-                dns_name_to_wire(NULL, &towire, "ns");
-                dns_full_name_to_wire(NULL, &towire, sdt->domain);
-            } else {
-                dns_full_name_to_wire(NULL, &towire, my_name);
-            }
-            dnssd_hardwired_add(sdt, "_dns-push-tls._tcp", sdt->domain_ld, towire.p - wire.data, wire.data, dns_rrtype_srv);
-            // This will probably never be used, but existing open source mDNSResponder code can be
-            // configured to do DNS queries over TLS for specific domains, so we might as well support it,
-            // since we do have TLS support.
-            dnssd_hardwired_add(sdt, "_dns-query-tls._udp", sdt->domain_ld, towire.p - wire.data, wire.data, dns_rrtype_srv);
-        }
-    
         // If my_name wasn't set, or if my_name is in this interface's domain, we need to answer
         // for it when queried.
         if (my_name == NULL || my_name_parsed != NULL) {
@@ -646,7 +646,6 @@ dnssd_hardwired_setup(void)
             }
             if (local_name != NULL) {
                 for (i = 0; i < num_publish_addrs; i++) {
-                    addr_t addr;
                     RESET;
                     memset(&addr, 0, sizeof addr);
                     getipaddr(&addr, publish_addrs[i]);
@@ -694,23 +693,65 @@ dnssd_hardwired_setup(void)
         if (sdt == NULL) {
             ERROR("Unable to allocate domain for %s", my_name);
         } else {
-            // A
-            // ns
-            for (i = 0; i < num_listen_addrs; i++) {
-                RESET;
-                dns_rdata_a_to_wire(&towire, listen_addrs[i]);
-                dnssd_hardwired_add(sdt, "", sdt->domain, towire.p - wire.data, wire.data, dns_rrtype_a);
-            }
-
             for (i = 0; i < num_publish_addrs; i++) {
                 // AAAA
+                // A
                 RESET;
-                dns_rdata_aaaa_to_wire(&towire, publish_addrs[i]);
-                dnssd_hardwired_add(sdt, "", sdt->domain, towire.p - wire.data, wire.data, dns_rrtype_aaaa);
+                memset(&addr, 0, sizeof addr);
+                getipaddr(&addr, publish_addrs[i]);
+                if (addr.sa.sa_family == AF_INET) {
+                    dns_rdata_raw_data_to_wire(&towire, &addr.sin.sin_addr, sizeof addr.sin.sin_addr);
+                    dnssd_hardwired_add(sdt, "", sdt->domain, towire.p - wire.data, wire.data, dns_rrtype_a);
+                } else {
+                    dns_rdata_raw_data_to_wire(&towire, &addr.sin6.sin6_addr, sizeof addr.sin6.sin6_addr);
+                    dnssd_hardwired_add(sdt, "", sdt->domain, towire.p - wire.data, wire.data, dns_rrtype_aaaa);
+                }
             }
         }
     }
     dnssd_hardwired_lbdomains_setup(&towire, &wire);
+}
+
+void
+dnssd_hardwired_push_setup(void)
+{
+    dns_wire_t wire;
+    dns_towire_state_t towire;
+    served_domain_t *sdt;
+
+#define RESET \
+    memset(&towire, 0, sizeof towire); \
+    towire.message = &wire; \
+    towire.p = wire.data; \
+    towire.lim = towire.p + sizeof wire.data
+
+    // For each interface, set up the hardwired names.
+    for (sdt = served_domains; sdt; sdt = sdt->next) {
+        if (sdt->interface == NULL) {
+            continue;
+        }
+        
+        if (!sdt->interface->no_push) {
+            // SRV
+            // _dns-push-tls._tcp
+            RESET;
+            dns_u16_to_wire(&towire, 0); // priority
+            dns_u16_to_wire(&towire, 0); // weight
+            dns_u16_to_wire(&towire, 853); // port
+            // Define my_name in the config file to reference a name for this server in a different zone.
+            if (my_name == NULL) {
+                dns_name_to_wire(NULL, &towire, "ns");
+                dns_full_name_to_wire(NULL, &towire, sdt->domain);
+            } else {
+                dns_full_name_to_wire(NULL, &towire, my_name);
+            }
+            dnssd_hardwired_add(sdt, "_dns-push-tls._tcp", sdt->domain_ld, towire.p - wire.data, wire.data, dns_rrtype_srv);
+            // This will probably never be used, but existing open source mDNSResponder code can be
+            // configured to do DNS queries over TLS for specific domains, so we might as well support it,
+            // since we do have TLS support.
+            dnssd_hardwired_add(sdt, "_dns-query-tls._udp", sdt->domain_ld, towire.p - wire.data, wire.data, dns_rrtype_srv);
+        }
+    }
 }
 
 bool
@@ -745,7 +786,7 @@ dp_query_send_dns_response(dnssd_query_t *query)
     uint16_t mask = 0;
 
     // Send an SOA record if it's a .local query.
-    if (query->iface != NULL && !towire->truncated) {
+    if (query->served_domain != NULL && query->served_domain->interface != NULL && !towire->truncated) {
     redo:
         // DNSSD Hybrid, Section 6.1.
         TOWIRE_CHECK("&query->enclosing_domain_pointer 1", towire,
@@ -922,7 +963,7 @@ dnssd_hardwired_response(dnssd_query_t *query, DNSServiceQueryRecordReply callba
     hardwired_t *hp;
     bool got_response = false;
 
-    for (hp = query->iface->hardwired_responses; hp; hp = hp->next) {
+    for (hp = query->served_domain->hardwired_responses; hp; hp = hp->next) {
         if ((query->type == hp->type || query->type == dns_rrtype_any) &&
             query->qclass == dns_qclass_in && !strcasecmp(hp->name, query->name)) {
             if (query->is_dns_push) {
@@ -1010,13 +1051,17 @@ dp_query_wakeup(io_t *io)
     int namelen = strlen(query->name);
 
     // Should never happen.
-    if ((namelen + query->iface != NULL ? sizeof local_suffix : 0) > sizeof name) {
+    if (namelen + (query->served_domain
+                   ? (query->served_domain->interface != NULL
+                      ? sizeof local_suffix
+                      : strlen(query->served_domain->domain_ld))
+                   : 0) > sizeof name) {
         ERROR("db_query_wakeup: no space to construct name.");
         dnssd_query_cancel(&query->io);
     }
 
     strcpy(name, query->name);
-    if (query->iface != NULL) {
+    if (query->served_domain != NULL) {
         strcpy(name + namelen, local_suffix);
     }
     dp_query_send_dns_response(query);
@@ -1027,35 +1072,52 @@ dp_query_start(comm_t *comm, dnssd_query_t *query, int *rcode, DNSServiceQueryRe
 {
     char name[DNS_MAX_NAME_SIZE + 1];
     char *np;
+    bool local = false;
+    int len;
 
-    if (query->iface != NULL) {
+    // If a query has a served domain, query->name is the subdomain of the served domain that is
+    // being queried; otherwise query->name is the whole name.
+    if (query->served_domain != NULL) {
         if (dnssd_hardwired_response(query, callback)) {
             *rcode = dns_rcode_noerror;
             return true;
         }
-
-        int len = strlen(query->name);
-        if (len + sizeof local_suffix > sizeof name) {
-            *rcode = dns_rcode_servfail;
-            free(query->name);
-            free(query);
-            ERROR("question name %s is too long for .local.", name);
-            return false;
+        len = strlen(query->name);
+        if (query->served_domain->interface != NULL) {
+            if (len + sizeof local_suffix > sizeof name) {
+                *rcode = dns_rcode_servfail;
+                free(query->name);
+                free(query);
+                ERROR("question name %s is too long for .local.", name);
+                return false;
+            }
+            memcpy(name, query->name, len);
+            memcpy(&name[len], local_suffix, sizeof local_suffix);
+        } else {
+            int dlen = strlen(query->served_domain->domain_ld) + 1;
+            if (len + dlen > sizeof name) {
+                *rcode = dns_rcode_servfail;
+                free(query->name);
+                free(query);
+                ERROR("question name %s is too long for %s.", name, query->served_domain->domain);
+                return false;
+            }
+            memcpy(name, query->name, len);
+            memcpy(&name[len], query->served_domain->domain_ld, dlen);
         }
-        memcpy(name, query->name, len);
-        memcpy(&name[len], local_suffix, sizeof local_suffix);
         np = name;
+        local = true;
     } else {
         np = query->name;
     }
         
-    // If we get an SOA query for record that's under a zone cut we're authoritative, which
-    // is the case of query->iface != NULL, then answer with a negative response that includes
+    // If we get an SOA query for record that's under a zone cut we're authoritative for, which
+    // is the case of query->served_domain->interface != NULL, then answer with a negative response that includes
     // our authority records, rather than waiting for the query to time out.
-    if (query->iface != NULL && (query->type == dns_rrtype_soa ||
-                                 query->type == dns_rrtype_ns ||
-                                 query->type == dns_rrtype_ds) &&
-        query->qclass == dns_qclass_in && query->is_dns_push == false) {
+    if (query->served_domain != NULL && query->served_domain->interface != NULL &&
+        (query->type == dns_rrtype_soa ||
+         query->type == dns_rrtype_ns ||
+         query->type == dns_rrtype_ds) && query->qclass == dns_qclass_in && query->is_dns_push == false) {
         query->question = comm->message;
         comm->message = NULL;
         dp_query_send_dns_response(query);
@@ -1077,7 +1139,7 @@ dp_query_start(comm_t *comm, dnssd_query_t *query, int *rcode, DNSServiceQueryRe
     // If this isn't a DNS Push subscription, we need to respond quickly with as much data as we have.  It
     // turns out that dig gives us a second, but also that responses seem to come back in on the order of a
     // millisecond, so we'll wait 100ms.
-    if (!query->is_dns_push && query->iface) {
+    if (!query->is_dns_push && local) {
         query->io.wakeup_time = ioloop_now + IOLOOP_SECOND * 6; // [mDNSDP 5.6 p. 25]
         query->io.wakeup = dp_query_wakeup;
     }
@@ -1129,11 +1191,11 @@ dp_query_generate(comm_t *comm, dns_rr_t *question, bool dns_push, int *rcode)
         return NULL;
     }
     // It is safe to assume that enclosing domain will not be freed out from under us.
-    query->iface = sdt;
+    query->served_domain = sdt;
     query->serviceFlags = 0;
 
     // If this is a local query, add ".local" to the end of the name and require multicast.
-    if (sdt != NULL) {
+    if (sdt != NULL && sdt->interface) {
         query->serviceFlags |= kDNSServiceFlagsForceMulticast;
     } else {
         query->serviceFlags |= kDNSServiceFlagsReturnIntermediates;
@@ -1470,11 +1532,11 @@ dp_dns_query(comm_t *comm, dns_rr_t *question)
 
     // For DNS queries, we need to return the question.
     query->response->qdcount = htons(1);
-    if (query->iface != NULL) {
+    if (query->served_domain != NULL) {
         TOWIRE_CHECK("name", &query->towire, dns_name_to_wire(NULL, &query->towire, query->name));
         TOWIRE_CHECK("enclosing_domain", &query->towire,
                      dns_full_name_to_wire(&query->enclosing_domain_pointer,
-                                           &query->towire, query->iface->domain));
+                                           &query->towire, query->served_domain->domain));
     } else {
         TOWIRE_CHECK("full name", &query->towire, dns_full_name_to_wire(NULL, &query->towire, query->name));
     }        
@@ -1815,12 +1877,154 @@ config_file_verb_t dp_verbs[] = {
 };
 #define NUMCFVERBS ((sizeof dp_verbs) / sizeof (config_file_verb_t))
 
+void
+dnssd_push_setup()
+{
+    listener[num_listeners] = setup_listener_socket(AF_INET, IPPROTO_TCP, true,
+                                                    tls_port, NULL, NULL, "IPv4 DNS Push Listener", dns_input, connected, 0);
+    if (listener[num_listeners] == NULL) {
+        ERROR("IPv4 DNS Push listener: fail.");
+        return;
+    }
+    num_listeners++;
+    
+    listener[num_listeners] = setup_listener_socket(AF_INET6, IPPROTO_TCP, true,
+                                                    tls_port, NULL, NULL, "IPv6 DNS Push Listener", dns_input, connected, 0);
+    if (listener[num_listeners] == NULL) {
+        ERROR("IPv6 DNS Push listener: fail.");
+        return;
+    }
+    num_listeners++;
+
+    dnssd_hardwired_push_setup();
+}
+
+// Start a key generation or cert signing program.   Arguments are key=value pairs.
+// Arguments that can be constant should be <"key=value", NULL>.   Arguments that
+// have a variable component should be <"key", value">.  References to arguments
+// will be held, except that if the rhs of the pair is variable, memory is allocated
+// to store the key=value pair, so the neither the key nor the value is retained.
+// The callback is called when the program exits.
+
+void
+keyprogram_start(const char *program, subproc_callback_t callback, ...)
+{
+#define MAX_SUBPROC_VARS 3
+    size_t lens[MAX_SUBPROC_VARS];
+    char *vars[MAX_SUBPROC_VARS];
+    int num_vars = 0;
+    char *argv[MAX_SUBPROC_ARGS + 1];
+    int argc = 0;
+    va_list vl;
+    int i;
+    
+    va_start(vl, callback);
+    while (true) {
+        char *vname, *value;
+        char *arg;
+
+        vname = va_arg(vl, char *);
+        if (vname == NULL) {
+            break;
+        }
+        value = va_arg(vl, char *);
+
+        if (argc >= MAX_SUBPROC_ARGS) {
+            ERROR("keyprogram_start: too many arguments.");
+        }
+
+        if (value == NULL) {
+            arg = vname;
+        } else {
+            if (num_vars >= MAX_SUBPROC_VARS) {
+                ERROR("Too many variable args: %s %s", vname, value);
+                goto out;
+            }
+            lens[num_vars] = strlen(vname) + strlen(value) + 2;
+            vars[num_vars] = malloc(lens[num_vars]);
+            if (vars[num_vars] == NULL) {
+                ERROR("No memory for variable key=value %s %s", vname, value);
+                goto out;
+            }
+            snprintf(vars[num_vars], lens[num_vars], "%s=%s", vname, value);
+            arg = vars[num_vars];
+            num_vars++;
+        }
+        argv[argc++] = arg;
+    }
+    argv[argc] = NULL;
+    ioloop_subproc(program, argv, argc, callback);
+out:
+    for (i = 0; i < num_vars; i++) {
+        free(vars[i]);
+    }
+}
+
+bool
+finished_okay(const char *context, int status, const char *error)
+{
+    // If we get an error, something failed before the program had been successfully started.
+    if (error != NULL) {
+        ERROR("%s failed on startup: %s", context, error);
+    }
+
+    // The key file generation process completed
+    else if (WIFEXITED(status)) {
+        if (WEXITSTATUS(status) != 0) {
+            ERROR("%s program exited with status %d", context, status);
+            // And that means we don't have DNS Push--sorry!
+        } else {
+            return true;
+        }
+    } else if (WIFSIGNALED(status)) {
+        ERROR("%s program exited on signal %d", context, WTERMSIG(status));
+        // And that means we don't have DNS Push--sorry!
+    } else if (WIFSTOPPED(status)) {
+        ERROR("%s program stopped on signal %d", context, WSTOPSIG(status));
+        // And that means we don't have DNS Push--sorry!
+    } else {        
+        ERROR("%s program exit status unknown: %d", context, status);
+        // And that means we don't have DNS Push--sorry!
+    }
+    return false;
+}
+
+// Called after the cert has been generated.
+void
+certfile_finished_callback(subproc_t *subproc, int status, const char *error)
+{
+    // If we were able to generate a cert, we can start DNS Push service and start advertising it.
+    if (finished_okay("Certificate signing", status, error)) {
+        int i = num_listeners;
+
+        dnssd_push_setup();
+
+        for (; i < num_listeners; i++) {
+            INFO("Started %s", listener[i]->name);
+        }
+    }
+}
+
+// Called after the key has been generated.
+void
+keyfile_finished_callback(subproc_t *subproc, int status, const char *error)
+{
+    if (finished_okay("Keyfile generation", status, error)) {
+            INFO("Keyfile generation completed.");
+
+            // XXX dates need to not be constant!!!
+            keyprogram_start(CERTWRITE_PROGRAM, certfile_finished_callback,
+                             "selfsign=1", NULL, "issuer_key", tls_key_filename, "issuer_name=CN", my_name,
+                             "not_before=20190226000000", NULL, "not_after=20211231235959", NULL, "is_ca=1", NULL,
+                             "max_pathlen=0", NULL, "output_file", tls_cert_filename, NULL);
+    }
+
+}
+
 int
 main(int argc, char **argv)
 {
     int i;
-    comm_t *listener[4 + MAX_ADDRS];
-    int num_listeners = 0;
     bool tls_fail = false;
 
     udp_port = tcp_port = 53;
@@ -1848,6 +2052,9 @@ main(int argc, char **argv)
 
     map_interface_addresses(&served_domains, ifaddr_callback);
 
+    // Set up hardwired answers
+    dnssd_hardwired_setup();
+
     if (!srp_tls_init()) {
         return 1;
     }
@@ -1855,8 +2062,14 @@ main(int argc, char **argv)
     // The tls_fail flag allows us to run the proxy in such a way that TLS connections will fail.
     // This is never what you want in production, but is useful for testing.
     if (!tls_fail) {
-        if (!srp_tls_server_init(NULL, tls_cert_filename, tls_key_filename)) {
-            return 1;
+        if (access(tls_key_filename, R_OK) < 0) {
+            keyprogram_start(GENKEY_PROGRAM, keyfile_finished_callback,
+                             "type=rsa", NULL, "rsa_keysize=4096", NULL, "filename", tls_key_filename, NULL);
+        } else if (access(tls_cert_filename, R_OK) < 0) {
+            keyfile_finished_callback(NULL, 0, NULL);
+        } else if (srp_tls_server_init(NULL, tls_cert_filename, tls_key_filename)) {
+            // If we've been able to set up TLS, then we can do DNS push.
+            dnssd_push_setup();
         }
     }        
 
@@ -1864,26 +2077,6 @@ main(int argc, char **argv)
         return 1;
     }
 
-
-    // Set up hardwired answers
-    dnssd_hardwired_setup();
-
-    listener[num_listeners] = setup_listener_socket(AF_INET, IPPROTO_TCP, false,
-                                                    tcp_port, NULL, NULL, "IPv4 DNS Push Listener", dns_input, connected, 0);
-    if (listener[num_listeners] == NULL) {
-        ERROR("TCPv4 listener: fail.");
-        return 1;
-    }
-    num_listeners++;
-    
-    listener[num_listeners] = setup_listener_socket(AF_INET, IPPROTO_TCP, true,
-                                                    tls_port, NULL, NULL, "IPv4 DNS TLS Listener", dns_input, connected, 0);
-    if (listener[num_listeners] == NULL) {
-        ERROR("TLS4 listener: fail.");
-        return 1;
-    }
-    num_listeners++;
-    
     for (i = 0; i < num_listen_addrs; i++) {
         listener[num_listeners] = setup_listener_socket(AF_UNSPEC, IPPROTO_UDP, false, udp_port, listen_addrs[i], NULL,
                                                         "DNS UDP Listener", dns_input, 0, 0);
@@ -1894,21 +2087,23 @@ main(int argc, char **argv)
         num_listeners++;
     }
     
+    listener[num_listeners] = setup_listener_socket(AF_INET, IPPROTO_TCP, false,
+                                                    tcp_port, NULL, NULL, "IPv4 TCP DNS Listener", dns_input, connected, 0);
+    if (listener[num_listeners] == NULL) {
+        ERROR("TCPv4 listener: fail.");
+        return 1;
+    } else {
+        num_listeners++;
+    }
+    
     listener[num_listeners] = setup_listener_socket(AF_INET6, IPPROTO_TCP, false,
-                                                    tcp_port, NULL, NULL, "IPv6 DNS Push Listener", dns_input, connected, 0);
+                                                    tcp_port, NULL, NULL, "IPv6 TCP DNS Listener", dns_input, connected, 0);
     if (listener[num_listeners] == NULL) {
         ERROR("TCPv6 listener: fail.");
         return 1;
+    } else {
+        num_listeners++;
     }
-    num_listeners++;
-    
-    listener[num_listeners] = setup_listener_socket(AF_INET6, IPPROTO_TCP, true,
-                                                    tls_port, NULL, NULL, "IPv6 DNS TLS Listener", dns_input, connected, 0);
-    if (listener[num_listeners] == NULL) {
-        ERROR("TLS6 listener: fail.");
-        return 1;
-    }
-    num_listeners++;
 
     // If we haven't been given any addresses to listen on, listen on an IPv4 address and an IPv6 address.
     if (num_listen_addrs == 0) {

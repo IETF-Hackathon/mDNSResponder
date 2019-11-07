@@ -41,10 +41,16 @@ struct delete {
     bool consumed;
 };
 
+typedef struct host_addr host_addr_t;
+struct host_addr {
+    host_addr_t *NULLABLE next;
+    dns_rr_t rr;
+};
 typedef struct dns_host_description dns_host_description_t;
 struct dns_host_description {
     dns_name_t *NONNULL name;
-    dns_rr_t *NULLABLE a, *NULLABLE aaaa, *NULLABLE key;
+    host_addr_t *NULLABLE addrs;
+    dns_rr_t *NULLABLE key;
     delete_t *NULLABLE delete;
     int num_instances;
 };
@@ -106,6 +112,14 @@ struct update {
     size_t update_max;
     uint8_t fail_rcode;                           // rcode to return after deleting added service instances.
 };
+
+void srp_update_free_parts(service_instance_t *NULLABLE service_instances, service_instance_t *NULLABLE added_instances,
+                           service_t *NULLABLE services, dns_host_description_t *NULLABLE host_description);
+void srp_update_free(update_t *NONNULL update);
+bool srp_proxy_listen(void);
+bool srp_evaluate(comm_t *NONNULL comm, dns_message_t *NONNULL message);
+bool srp_update_start(comm_t *NONNULL connection, dns_message_t *NONNULL parsed_message, dns_host_description_t *NONNULL host,
+                      service_instance_t *NONNULL instance, service_t *NONNULL service, dns_name_t *NONNULL update_zone);
 
 // Local Variables:
 // mode: C

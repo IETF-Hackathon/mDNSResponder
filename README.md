@@ -10,13 +10,22 @@ This work is the product of the IETF [DNSSD](https://datatracker.ietf.org/wg/dns
 The specification for the DNS-SD Discovery Proxy can be found in
 [draft-ietf-dnssd-hybrid](https://tools.ietf.org/html/draft-ietf-dnssd-hybrid).
 
-Other useful background reading includes
+Other useful background reading includes the
+[Service Discovery Road Map](https://tools.ietf.org/html/draft-cheshire-dnssd-roadmap),
 [Multicast DNS (RFC 6762)](https://tools.ietf.org/html/rfc6762),
 [DNS-Based Service Discovery (RFC 6763)](https://tools.ietf.org/html/rfc6763),
 [DNS Stateful Operations (RFC 8490)](https://tools.ietf.org/html/rfc8490), and
 [DNS Push Notifications](https://tools.ietf.org/html/draft-ietf-dnssd-push).
 
-This document last updated 2019-07-17.
+This Discovery Proxy will work, using DNS polling, with
+any version of Mac OS X 10.4 (released in 2004) or later.
+Support for wide area unicast service discovery has also been included
+in every version of iOS since the first iPhone in 2007.
+However, to get the benefit of fast asynchronous change notifications using
+DNS Push Notifications, which keeps the user interface up to date without polling,
+we highly recommend testing using the current shipping versions, macOS Catalina and iOS 13.
+
+This document last updated 2019-10-02.
 
 ## Example Scenario
 
@@ -84,12 +93,12 @@ If you want to build this code yourself to run on a Mac or Linux machine, skip a
 
 If you’re using OpenWrt and don’t want to build the code yourself,
 we have a prebuilt package for the router we are using for development,
-the [GL-iNet AR750S](https://www.gl-inet.com/products/gl-ar750s/).
+the [GL.iNet AR750S](https://www.gl-inet.com/products/gl-ar750s/).
 This package may also work on routers with similar hardware.
 
-Connect the WAN port of the AR750S to your existing home network,
-and connect your computer to a LAN port on the AR750S, or its Wi-Fi network.
-Ensure that your AR750S is up to date with the latest firmware from GL-iNet.
+Connect the upstream WAN port of the AR750S to your existing home network,
+and connect your computer to a downstream LAN port on the AR750S, or its Wi-Fi network.
+Ensure that your AR750S is up to date with the latest firmware from GL.iNet.
 At time of writing, this is version 3.025.
 When you update the firmware, turn off the “Keep Settings” option.
 This will restore your device to factory defaults,
@@ -97,15 +106,19 @@ which ensures that you’re following the setup steps described here
 starting with the same factory default configuration that we did.
 
 Your AR750S should be in the default configuration,
-where it is obtaining an IP address for itself using DHCP on its WAN port (your existing home network),
+where it is obtaining an IP address for itself using DHCP on its upstream WAN port (your existing home network),
 and sharing that IP address with its LAN (and Wi-Fi) clients by operating its own DHCP server and NAT gateway.
 
 At this point, take a moment to observe that your computer connected to the AR750S’s
-LAN port or Wi-Fi cannot discover anything on the WAN port side.
-If you press Cmd-Shift-K (“New Remote Connection”) in Terminal, you’ll not see any services on the WAN port side.
-If you go to System Preferences and try to add a printer, you’ll not discover any printers on the WAN port side.
+downstream LAN port or Wi-Fi cannot discover anything on the upstream WAN port side.
+If you press Cmd-Shift-K (“New Remote Connection”) in Terminal,
+you’ll not see any services on the upstream WAN port side.
+If you go to System Preferences and try to add a printer,
+you’ll not discover any printers on the upstream WAN port side.
+If you run “Image Capture”,
+you’ll not discover any scanners on the upstream WAN port side.
 
-To install the proxy using the command line, bring up a Terminal window on your Mac and type:
+To install the Discovery Proxy on your AR750S, bring up a Terminal window on your Mac and type:
 
     ssh root@192.168.8.1
 
@@ -135,7 +148,8 @@ It’s just sitting there collecting random data, so it will eventually complete
     gen_key type=rsa rsa_keysize=4096 filename=server.key
     cert_write selfsign=1 issuer_key=server.key issuer_name=CN=discoveryproxy.home.arpa not_before=20190226000000 not_after=20211231235959 is_ca=1 max_pathlen=0 output_file=server.crt
 
-Create firewall rules to allow [Multicast DNS](https://tools.ietf.org/html/rfc6762) service discovery on the WAN port:
+Create firewall rules to allow [Multicast DNS](https://tools.ietf.org/html/rfc6762) service discovery
+on the AR750S’s upstream WAN port:
 
     uci add glfw opening
     uci set glfw.@opening[-1].name='mDNS'
@@ -151,27 +165,49 @@ Configure the DHCP domain which is communicated to clients:
     /etc/init.d/dhcpd restart
     reboot
 
-At this point your Discovery Proxy is configured and running.
-In this default configuration your Discovery Proxy is configured
-to offer Discovery Proxy service on the LAN ports (and Wi-Fi),
-using [Multicast DNS](https://tools.ietf.org/html/rfc6762) to
-discover existing services on its WAN port (your existing home network).
-This makes services on the upstream WAN port
-visible to clients on the downstream LAN ports or Wi-Fi,
-even though the clients are not on the same link or IPv4 subnet
-as the services they are discovering.
+At this point your AR750S Discovery Proxy is configured and ready for use.
+In this default configuration your AR750S Discovery Proxy is configured
+to offer unicast Discovery Proxy service on its downstream LAN ports and Wi-Fi,
+using [Multicast DNS](https://tools.ietf.org/html/rfc6762)
+on its upstream WAN port (your existing home network)
+to discover existing services on that network.
+This makes services on the AR750S’s upstream WAN port
+visible to clients on the AR750S’s downstream LAN ports and Wi-Fi,
+even though those clients are not on the same link or IPv4 subnet
+as the services they are discovering,
+and no multicast packets are being forwarded
+between the client link (AR750S LAN port or Wi-Fi)
+and the services link (AR750S WAN port).
+This is possible because existing clients are already able
+to perform service discovery using unicast DNS queries,
+in addition to the old way using multicast DNS queries.
 
-Once the AR750S completes its reboot,
-if you’re connecting via Wi-Fi confirm that your computer is still associated with the AR750S,
-and then try again to see what your computer can discover now.
+Once the AR750S completes its reboot, the Discovery Proxy is available and running.
+If you’re connecting via Wi-Fi, confirm that your computer is still associated with the AR750S
+(it may have reverted to your previous Wi-Fi network while the AR750S was rebooting).
 
-If you have network printers on your existing home network,
-they will now appear in when you click the “+” button to add a printer
-in the “Printers & Scanners” section of System Preferences.
+Note: We are aware of a race condition where,
+if the upstream DHCP server is slow,
+sometimes the Discovery Proxy may not recognize the correct
+upstream DNS configuration, resulting in DNS failures.
+We will be fixing this race condition, but in the meantime, to avoid problems caused by this,
+use the commands shown below to log in to the AR750S and manually restart the mDNSResponder daemon:
+
+    ssh root@192.168.8.1
+    /etc/init.d/mDNSResponder restart
+
+Now try again to see what your computer can discover.
 
 If you have machines with ssh enabled that are usually visible
 in “New Remote Connection” in Terminal, they should now be visible
-when you’re connected to a AR750S LAN port or Wi-Fi.
+when you’re connected to an AR750S downstream LAN port or Wi-Fi.
+
+If you have network printers on your existing home network,
+they should now appear in when you click the “+” button to add a printer
+in the “Printers & Scanners” section of System Preferences.
+
+If you have a scanner on your existing home network,
+it should now appear when you run the “Image Capture” app.
 
 Note: We received one report of problems connecting.
 If you use VPN, and your company has
@@ -211,8 +247,7 @@ your copy of the mDNSResponder code, clone this Git repository, and build the co
 	make
 
 In the “build” subdirectory this will create the dnssd-proxy executable.
-Now you have built the code,
-continue below with
+Now you have built the code, continue below with
 [Picking a DNS Subdomain Name for your Advertised Services](#picking-a-dns-subdomain-name-for-your-advertised-services).
 
 ## Picking a DNS Subdomain Name for your Advertised Services
@@ -266,11 +301,12 @@ For testing, it is okay if this link subdomain name is not formally delegated to
 If you don’t have a suitable domain name you can use,
 then you can use “service.home.arpa”
 as the name for the link on which the Discovery Proxy resides.
+The “home.arpa” domain is reserved for this kind of local use.
 
 To recap:
 two DNS domain names are involved here,
 the DNS name for the advertised link, and
-the DNS hostname for the Discovery Proxy performing the discovery on that advertised link.
+the DNS hostname for the Discovery Proxy responsible for performing discovery on that advertised link.
 These two names are different.
 One names the advertised link; the other names the device making that advertised link visible to clients.
 By default the names for testing are:
@@ -281,7 +317,7 @@ By default the names for testing are:
 ## Configuring and Running the Discovery Proxy
 
 Because the Discovery Proxy uses TLS, a key and certificate are required.
-Currently, for testing, self-signed certificates are allowed.
+Currently self-signed certificates are allowed.
 
 To generate the key and self-signed certificate, use the commands below.
 Replace the hostname discoveryproxy.home.arpa with the actual hostname of the Discovery Proxy device, if you have one.
@@ -329,9 +365,12 @@ followed by “waiting” when the dnssd-proxy is ready to start processing requ
 This Discovery Proxy, built using
 [DNS Stateful Operations](https://tools.ietf.org/html/rfc8490) and
 [DNS Push Notifications](https://tools.ietf.org/html/draft-ietf-dnssd-push),
-can be used with the current Apple developer seeds of iOS 13 and macOS Catalina.
-Older versions of iOS and macOS do not include support for
-DNS Stateful Operations and DNS Push Notifications.
+can be used with iOS 13 and macOS Catalina.
+Older versions of iOS and macOS will work with the Discovery Proxy,
+but since they do not include support for
+DNS Stateful Operations and DNS Push Notifications,
+they will not get immediate updates when data changes
+(like services coming and going on the network).
 
 The client needs to be told in which DNS domains to look for services,
 in addition to “local”
@@ -347,18 +386,22 @@ No manual client configuration is required.
 
 	lb._dns-sd._udp.example.org. PTR my-building.example.org.
 
+In our example setup given above for the GL.iNet AR750S,
+the DHCP server is set to configure client devices
+with a “domain” parameter of “service.home.arpa”,
+and when client devices perform the “lb” query to
+verify whether unicast DNS Service Discovery should be used,
+they receive a positive answer:
+
+	lb._dns-sd._udp.service.home.arpa. PTR service.home.arpa.
+
 There are other ways that automatic configuration can be performed, described in
 [Section 11 of RFC 6763](https://tools.ietf.org/html/rfc6763#section-11).
 
-If you are using the default configuration as we have described earlier, this will
-configure the correct domain; if you are using a different domain, that domain is
-the correct one to specify in this command, rather than service.home.arpa.
-You may need to disconnect from and reassociate with the router's Wifi network to
-get the new setting.
-
 In an operational network, no client configuration is required.
 It is all completely automatic.
-However, for testing, unless you have the necessary DNS records created,
+However, for testing, until you have the necessary DNS records created,
+as described here,
 you can simulate this via some manual client configuration.
 
 ### Manually adding a DNS search domain on the client, for testing

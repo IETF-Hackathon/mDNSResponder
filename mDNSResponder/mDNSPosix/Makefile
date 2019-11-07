@@ -54,6 +54,7 @@ COREDIR = ../mDNSCore
 SHAREDDIR ?= ../mDNSShared
 DSODIR ?= ../DSO
 JDK = /usr/jdk
+RESOLVCONF = \"/etc/resolv.conf\"
 
 SYSTEM := $(shell uname -s)
 ifeq ($(SYSTEM), Darwin)
@@ -71,7 +72,8 @@ SOOPTS = -shared
 CP = cp
 RM = rm
 LN = ln -s -f
-CFLAGS_COMMON = -I$(COREDIR) -I$(SHAREDDIR) -I$(DSODIR) -I$(PROXYDIR) -I$(OBJDIR) -fwrapv -W -Wall -DPID_FILE=\"/var/run/mdnsd.pid\" -DMDNS_UDS_SERVERPATH=\"/var/run/mdnsd\" -DDSO_HAS_TLS -DPOSIX_HAS_TLS -DDNS_PUSH_ENABLED
+CFLAGS_COMMON = -I$(COREDIR) -I$(SHAREDDIR) -I$(DSODIR) -I$(PROXYDIR) -I$(OBJDIR) -fwrapv -W -Wall -DPID_FILE=\"/var/run/mdnsd.pid\" -DMDNS_UDS_SERVERPATH=\"/var/run/mdnsd\" -DDSO_HAS_TLS -DPOSIX_HAS_TLS -DDNS_PUSH_ENABLED -DuDNS_SERVERS_FILE=$(RESOLVCONF)
+
 CFLAGS_PTHREAD =
 OS_LINKOPTS = $(OS_LINKOPTS)
 OS_LINKOPTS_PTHREAD = -lpthread
@@ -243,19 +245,23 @@ MDNSLINKOPTS = $(LINKOPTS) $(LDFLAGS) $(OS_LINKOPTS)
 #############################################################################
 
 all: setup Daemon libdns_sd Clients SAClient SAResponder SAProxyResponder Identify NetMonitor $(OPTIONALTARG)
+	(cd ../ServiceRegistration; make all)
 
 install: setup InstalledStartup InstalledDaemon InstalledLib InstalledManPages InstalledClients $(OPTINSTALL)
+	(cd ../ServiceRegistration; make install)
 
 # 'setup' sets up the build directory structure the way we want
 setup:
 	@if test ! -d $(OBJDIR)   ; then mkdir -p $(OBJDIR)   ; fi
 	@if test ! -d $(BUILDDIR) ; then mkdir -p $(BUILDDIR) ; fi
+	(cd ../ServiceRegistration; make setup)
 
 # clean removes targets and objects
 clean:
 	@if test -d $(OBJDIR)   ; then rm -r $(OBJDIR)   ; fi
 	@if test -d $(BUILDDIR) ; then rm -r $(BUILDDIR) ; fi
 	@$(MAKE) -C ../Clients clean
+	(cd ../ServiceRegistration; make clean)
 
 #############################################################################
 

@@ -103,18 +103,6 @@ struct dns_rdata_single_name {
     dns_label_t *NONNULL name;
 };
 
-typedef struct dns_rdata_a dns_rdata_a_t;
-struct dns_rdata_a {
-    struct in_addr *NONNULL addrs;
-    int num;
-};
-
-typedef struct dns_rdata_aaaa dns_rdata_aaaa_t;
-struct dns_rdata_aaaa {
-    struct in6_addr *NONNULL addrs;
-    int num;
-};
-
 typedef struct dns_rdata_srv dns_rdata_srv_t;
 struct dns_rdata_srv {
     dns_label_t *NONNULL name;
@@ -157,8 +145,8 @@ struct dns_rr {
         dns_rdata_unparsed_t unparsed;
         dns_rdata_ptr_t ptr;
         dns_rdata_cname_t cname;
-        dns_rdata_a_t a;
-        dns_rdata_aaaa_t aaaa;
+        struct in_addr a;
+        struct in6_addr aaaa;
         dns_rdata_srv_t srv;
         dns_txt_element_t *NONNULL txt;
         dns_rdata_sig_t sig;
