@@ -118,13 +118,17 @@ else
 
 # any target that contains the string "linux"
 ifeq ($(findstring linux,$(os)),linux)
-CFLAGS_OS = -D_GNU_SOURCE -DHAVE_IPV6 -DNOT_HAVE_SA_LEN -DUSES_NETLINK -DHAVE_LINUX -DTARGET_OS_LINUX -DUSES_INOTIFY -ftabstop=4
-LD = $(CC)
-SOOPTS = -shared
-FLEXFLAGS_OS = -l
-JAVACFLAGS_OS += -I$(JDK)/include/linux
-OS_LINKOPTS=-lmbedcrypto -lmbedtls -lmbedx509
-
+  os_id := $(shell sed -n -e 's/^ID=//p' < /etc/os-release)
+  ifeq ($(os_id), raspbian)
+    OS_LINKOPTS=/usr/local/lib/libmbedtls.a /usr/local/lib/libmbedx509.a /usr/local/lib/libmbedcrypto.a
+  else
+    OS_LINKOPTS=-lmbedcrypto -lmbedtls -lmbedx509
+  endif
+  CFLAGS_OS = -D_GNU_SOURCE -DHAVE_IPV6 -DNOT_HAVE_SA_LEN -DUSES_NETLINK -DHAVE_LINUX -DTARGET_OS_LINUX -DUSES_INOTIFY -ftabstop=4
+  LD = $(CC)
+  SOOPTS = -shared
+  FLEXFLAGS_OS = -l
+  JAVACFLAGS_OS += -I$(JDK)/include/linux
 # uClibc does not support Name Service Switch
 ifneq ($(os),linux-uclibc)
 OPTIONALTARG = nss_mdns

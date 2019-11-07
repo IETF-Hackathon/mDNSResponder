@@ -6,7 +6,12 @@ ifndef os
   ifeq ($(SYSTEM), Darwin)
     os=x
   else ifeq ($(SYSTEM), Linux)
-    os=linux
+    os_id := $(shell sed -n -e 's/^ID=//p' < /etc/os-release)
+    ifeq ($(os_id), raspbian)
+      os=raspbian
+    else
+      os=linux
+    endif
   endif
 endif
 
@@ -19,7 +24,7 @@ endif
 CP?=/bin/cp
 
 ifeq ($(os),x)
-SRPCFLAGS = -O0 -g -Wall -Werror -DSTANDALONE -I../mDNSCore -I/usr/local/include -I. -I../mDNSShared -I../DSO -MMD -MF .depfile-${notdir $<} -DUSE_KQUEUE
+SRPCFLAGS = -O0 -g -Wall -Werror -DSTANDALONE -I../mDNSCore -I/usr/local/include -I. -I../mDNSShared -I../DSO -MMD -MF .depfile-${notdir $<} -DUSE_KQUEUE -DHAVE_SOCKADDR_DL
 SRPLDOPTS = -lmbedcrypto -lmbedtls -lmbedx509
 else ifeq ($(os), linux)
 SRPCFLAGS = -DMDNS_UDS_SERVERPATH=\"/var/run/mdnsd\" -O0 -g -Wall -Werror -DSTANDALONE -I../mDNSCore -I/usr/local/include -I. -I../mDNSShared -I../DSO -MMD -MF .depfile-${notdir $<} -DNOT_HAVE_SA_LEN -DUSE_SELECT -DUSE_INOTIFY
@@ -27,9 +32,12 @@ SRPLDOPTS = -lmbedcrypto -lmbedtls -lmbedx509
 else ifeq ($(os), linux-uclibc)
 SRPCFLAGS = -DMDNS_UDS_SERVERPATH=\"/var/run/mdnsd\" -O0 -g -Wall -Werror -DSTANDALONE -I../mDNSCore -I/usr/local/include -I. -I../mDNSShared -I../DSO -MMD -MF .depfile-${notdir $<} -DNOT_HAVE_SA_LEN -DUSE_SELECT -DLINUX_GETENTROPY
 SRPLDOPTS = -lmbedcrypto -lmbedtls -lmbedx509
+else ifeq ($(os), raspbian)
+SRPCFLAGS = -DMDNS_UDS_SERVERPATH=\"/var/run/mdnsd\" -O0 -g -Wall -Werror -DSTANDALONE -I../mDNSCore -I/usr/local/include -I. -I../mDNSShared -I../DSO -MMD -MF .depfile-${notdir $<} -DNOT_HAVE_SA_LEN -DUSE_SELECT -DLINUX_GETENTROPY -DGENKEY_PROGRAM=$(GENKEY) -DCERTWRITE_PROGRAM=$(CERTWRITE)
+SRPLDOPTS = /usr/local/lib/libmbedtls.a /usr/local/lib/libmbedx509.a /usr/local/lib/libmbedcrypto.a
 endif
 
-all:	setup $(BUILDDIR)/srp-simple $(BUILDDIR)/srp-gw $(BUILDDIR)/keydump $(BUILDDIR)/dnssd-proxy
+all:	setup $(BUILDDIR)/srp-simple $(BUILDDIR)/keydump $(BUILDDIR)/dnssd-proxy # $(BUILDDIR)/dnssd-relay
 
 install: all
 	$(CP) $(BUILDDIR)/srp-simple $(INSTALL_PREFIX)/sbin
@@ -56,6 +64,9 @@ VERIFYOBJS   = $(OBJDIR)/verify-mbedtls.o
 FROMWIREOBJS = $(OBJDIR)/fromwire.o $(VERIFYOBJS) $(OBJDIR)/wireutils.o
 IOOBJS       = $(OBJDIR)/ioloop.o $(OBJDIR)/tls-mbedtls.o
 CFOBJS       = $(OBJDIR)/config-parse.o
+
+$(BUILDDIR)/dnssd-relay:  $(OBJDIR)/dnssd-relay.o $(DSOOBJS) $(IOOBJS) $(CFOBJS)
+	$(CC) -o $@ $+ $(SRPLDOPTS)
 
 $(BUILDDIR)/dnssd-proxy:  $(OBJDIR)/dnssd-proxy.o $(SIMPLEOBJS) $(DSOOBJS) $(MDNSOBJS) $(FROMWIREOBJS) $(IOOBJS) $(CFOBJS)
 	$(CC) -o $@ $+ $(SRPLDOPTS)
