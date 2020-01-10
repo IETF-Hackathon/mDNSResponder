@@ -186,11 +186,14 @@ Once the AR750S completes its reboot, the Discovery Proxy is available and runni
 If you’re connecting via Wi-Fi, confirm that your computer is still associated with the AR750S
 (it may have reverted to your previous Wi-Fi network while the AR750S was rebooting).
 
-Note: We are aware of a race condition where,
-if the upstream DHCP server is slow,
-sometimes the Discovery Proxy may not recognize the correct
-upstream DNS configuration, resulting in DNS failures.
-We will be fixing this race condition, but in the meantime, to avoid problems caused by this,
+**IMPORTANT:** We are aware of a boot-time race condition.
+At the instant the Discovery Proxy and the mDNSResponder process start,
+early in the boot process, there is not yet any configured upstream DNS recursive resolver.
+Mere milliseconds later the DHCP client obtains the DHCP lease
+and updates the network configuration information.
+The mDNSResponder process should notice this change and update its configuration information,
+but due to a bug it currently does not.
+We have a fix planned, but until the code is updated, after powering on the device, you need to
 use the commands shown below to log in to the AR750S and manually restart the mDNSResponder daemon:
 
     ssh root@192.168.8.1
